@@ -1,4 +1,11 @@
-export default function PlayerCard({ player, statuses, onClick, showPrimaryTeam = false }) {
+import React from 'react'
+
+// ⚡ Bolt Optimization:
+// Wrapped PlayerCard in React.memo() to prevent unnecessary re-renders.
+// Since these cards are rendered in large lists (TeamView, AllPlayers),
+// this ensures only cards with changed props (like when being dragged or updated) will re-render,
+// saving significant React reconciliation time during drag-and-drop operations.
+const PlayerCard = React.memo(function PlayerCard({ player, statuses, onClick, showPrimaryTeam = false }) {
   const status = statuses.find(s => s.id === player.status_id)
   
   return (
@@ -25,4 +32,6 @@ export default function PlayerCard({ player, statuses, onClick, showPrimaryTeam 
       )}
     </div>
   )
-}
+})
+
+export default PlayerCard
