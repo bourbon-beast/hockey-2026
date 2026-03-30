@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+functions/node_modules/
+migration/node_modules/
+
+# Build output
+dist/
+
+# Environment variables (never commit these)
+.env
+.env.local
+.env.*.local
+
+# Firebase
+.firebase/
+.firebaserc.local
+
+# Service account keys
+migration/*.json
+!migration/package.json
+!migration/package-lock.json
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
