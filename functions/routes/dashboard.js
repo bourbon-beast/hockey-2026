@@ -71,19 +71,29 @@ router.get('/', async (req, res) => {
     })
 
     // Season grid — lightweight counts per round per team
-    const seasonGrid = await Promise.all(rounds.map(async r => {
-      const counts = await all(`
-        SELECT team_id,
+    const roundIds = rounds.map(r => r.id)
+    let allCounts = []
+
+    if (roundIds.length > 0) {
+      const placeholders = roundIds.map(() => '?').join(',')
+      allCounts = await all(`
+        SELECT round_id, team_id,
           COUNT(*) as total,
           SUM(CASE WHEN confirmed = 2 THEN 1 ELSE 0 END) as confirmed
         FROM round_selections
-        WHERE round_id = ? AND is_unavailable = 0
-        GROUP BY team_id
-      `, [r.id])
-      const teamCounts = {}
-      counts.forEach(c => {
-        teamCounts[c.team_id] = { total: Number(c.total), confirmed: Number(c.confirmed) }
-      })
+        WHERE round_id IN (${placeholders}) AND is_unavailable = 0
+        GROUP BY round_id, team_id
+      `, roundIds)
+    }
+
+    const countsByRound = {}
+    allCounts.forEach(c => {
+      if (!countsByRound[c.round_id]) countsByRound[c.round_id] = {}
+      countsByRound[c.round_id][c.team_id] = { total: Number(c.total), confirmed: Number(c.confirmed) }
+    })
+
+    const seasonGrid = rounds.map(r => {
+      const teamCounts = countsByRound[r.id] || {}
       return {
         id:           r.id,
         round_number: r.round_number,
@@ -92,7 +102,7 @@ router.get('/', async (req, res) => {
         isCurrent:    r.id === currentRound.id,
         teams:        teamCounts,
       }
-    }))
+    })
 
     res.json({ currentRound, teamSummaries, seasonGrid })
   } catch (err) {
