@@ -10,7 +10,9 @@ const tursoUrl   = defineSecret('TURSO_URL')
 const tursoToken = defineSecret('TURSO_TOKEN')
 
 const app = express()
-app.use(cors({ origin: true }))
+
+const { corsOptions } = require('./cors-config')
+app.use(cors(corsOptions))
 app.use(express.json())
 
 // Set secrets into env on first request — Gen2 secrets available via .value() at request time
