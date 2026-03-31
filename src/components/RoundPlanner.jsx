@@ -1568,7 +1568,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
               <h3 className="font-semibold text-slate-800">Add player — {pickerOpen.teamId}</h3>
-              <button onClick={() => setPickerOpen(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+              <button onClick={() => setPickerOpen(null)} aria-label="Close modal" className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
             </div>
 
             <div className="px-4 py-2 border-b border-slate-100">
