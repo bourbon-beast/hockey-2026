@@ -5,6 +5,7 @@ import {
   collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
   addDoc, query, where, orderBy, writeBatch, deleteField
 } from 'firebase/firestore'
+import { getNextConfirmedState } from './utils.js'
 
 // ─── Config (Teams + Statuses) ───────────────────────────────────────────────
 
@@ -396,6 +397,8 @@ export async function updateSelectionUnavailable(roundId, teamId, playerId, isUn
   }
 }
 
+export { getNextConfirmedState } from './utils.js'
+
 export async function toggleSelectionConfirmed(roundId, teamId, playerId) {
   const selsSnap = await getDocs(collection(db, 'rounds', String(roundId), 'selections'))
   const target = selsSnap.docs.find(d => {
@@ -404,8 +407,7 @@ export async function toggleSelectionConfirmed(roundId, teamId, playerId) {
   })
   if (target) {
     const current = target.data().confirmed || 0
-    // Cycle: 0 → 1 → 2 → 3 → 0
-    const next = typeof current === 'number' ? (current + 1) % 4 : 1
+    const next = getNextConfirmedState(current)
     await updateDoc(target.ref, { confirmed: next })
     return next
   }
