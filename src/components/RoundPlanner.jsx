@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import * as DB from '../db'
 import { carryForwardSelections } from '../db'
 
@@ -664,7 +664,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
     ? Object.fromEntries(roundData.selections.map(s => [s.player_id, s.team_id]))
     : {}
 
-  const getAvailablePlayers = () => {
+  const availablePlayers = useMemo(() => {
     const selected = getSelectedPlayerIds(pickerOpen?.teamId)
     return allPlayers
       .filter(p => !selected.has(p.id))
@@ -677,7 +677,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
         if (aU !== bU) return aU ? 1 : -1
         return a.name.localeCompare(b.name)
       })
-  }
+  }, [allPlayers, pickerOpen?.teamId, showUnavailableInPicker, roundUnavailability, pickerTeamFilter, playerTeamMap, searchTerm, roundData])
 
   const getTeamSelections = (teamId) => {
     if (!roundData) return {}
@@ -1609,7 +1609,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
             </div>
 
             <div className="overflow-y-auto flex-1">
-              {getAvailablePlayers().map(p => {
+              {availablePlayers.map(p => {
                 const isSelected  = selectedPlayerIds.has(p.id)
                 const isUnavail   = !!roundUnavailability[p.id]
                 return (
@@ -1638,7 +1638,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
                   </div>
                 )
               })}
-              {getAvailablePlayers().length === 0 && (
+              {availablePlayers.length === 0 && (
                 <div className="px-4 py-6 text-center text-slate-400 text-sm">No players found</div>
               )}
             </div>
