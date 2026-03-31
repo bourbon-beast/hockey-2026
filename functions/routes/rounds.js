@@ -42,26 +42,41 @@ router.post('/', async (req, res) => {
       const prevMatches = await all('SELECT * FROM round_matches WHERE round_id = ?', [copy_from_round_id])
       const prevSelections = await all('SELECT * FROM round_selections WHERE round_id = ?', [copy_from_round_id])
 
-      for (const t of teams) {
-        const prevMatch = prevMatches.find(m => m.team_id === t.id) || {}
+      if (teams.length > 0) {
+        const matchPlaceholders = teams.map(() => '(?, ?, ?, ?, ?, ?)').join(', ')
+        const matchArgs = []
+        for (const t of teams) {
+          const prevMatch = prevMatches.find(m => m.team_id === t.id) || {}
+          matchArgs.push(roundId, t.id, '', prevMatch.time || '', prevMatch.venue || '', '')
+        }
         await run(`
           INSERT INTO round_matches (round_id, team_id, match_date, time, venue, opponent)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `, [roundId, t.id, '', prevMatch.time || '', prevMatch.venue || '', ''])
+          VALUES ${matchPlaceholders}
+        `, matchArgs)
       }
 
-      for (const s of prevSelections) {
+      if (prevSelections.length > 0) {
+        const selectionPlaceholders = prevSelections.map(() => '(?, ?, ?, ?, ?, 0)').join(', ')
+        const selectionArgs = []
+        for (const s of prevSelections) {
+          selectionArgs.push(roundId, s.team_id, s.player_id, s.slot_number, s.position || null)
+        }
         await run(`
           INSERT INTO round_selections (round_id, team_id, player_id, slot_number, position, confirmed)
-          VALUES (?, ?, ?, ?, ?, 0)
-        `, [roundId, s.team_id, s.player_id, s.slot_number, s.position || null])
+          VALUES ${selectionPlaceholders}
+        `, selectionArgs)
       }
     } else {
-      for (const t of teams) {
+      if (teams.length > 0) {
+        const matchPlaceholders = teams.map(() => '(?, ?, ?, ?, ?, ?)').join(', ')
+        const matchArgs = []
+        for (const t of teams) {
+          matchArgs.push(roundId, t.id, '', '', '', '')
+        }
         await run(`
           INSERT INTO round_matches (round_id, team_id, match_date, time, venue, opponent)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `, [roundId, t.id, '', '', '', ''])
+          VALUES ${matchPlaceholders}
+        `, matchArgs)
       }
     }
 
@@ -180,16 +195,21 @@ router.post('/:id/carry-forward', async (req, res) => {
     const existingKeys = new Set(existing.map(s => `${s.team_id}:${Number(s.player_id)}`))
 
     // Insert missing players, reset confirmed to 0 (unconfirmed for new round)
+    const toInsert = fromSelections.filter(s => !existingKeys.has(`${s.team_id}:${Number(s.player_id)}`))
     let inserted = 0
-    for (const s of fromSelections) {
-      const key = `${s.team_id}:${Number(s.player_id)}`
-      if (!existingKeys.has(key)) {
-        await run(
-          'INSERT INTO round_selections (round_id, team_id, player_id, slot_number, position, confirmed) VALUES (?, ?, ?, ?, ?, 0)',
-          [nextRound.id, s.team_id, s.player_id, s.slot_number, s.position || null]
-        )
-        inserted++
+
+    if (toInsert.length > 0) {
+      const placeholders = toInsert.map(() => '(?, ?, ?, ?, ?, 0)').join(', ')
+      const args = []
+      for (const s of toInsert) {
+        args.push(nextRound.id, s.team_id, s.player_id, s.slot_number, s.position || null)
       }
+
+      await run(
+        `INSERT INTO round_selections (round_id, team_id, player_id, slot_number, position, confirmed) VALUES ${placeholders}`,
+        args
+      )
+      inserted = toInsert.length
     }
 
     res.json({ success: true, to_round_id: nextRound.id, to_round_number: nextRound.round_number, inserted })
