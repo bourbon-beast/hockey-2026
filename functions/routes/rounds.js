@@ -42,8 +42,13 @@ router.post('/', async (req, res) => {
       const prevMatches = await all('SELECT * FROM round_matches WHERE round_id = ?', [copy_from_round_id])
       const prevSelections = await all('SELECT * FROM round_selections WHERE round_id = ?', [copy_from_round_id])
 
+      const prevMatchesMap = new Map()
+      for (const m of prevMatches) {
+        prevMatchesMap.set(m.team_id, m)
+      }
+
       for (const t of teams) {
-        const prevMatch = prevMatches.find(m => m.team_id === t.id) || {}
+        const prevMatch = prevMatchesMap.get(t.id) || {}
         await run(`
           INSERT INTO round_matches (round_id, team_id, match_date, time, venue, opponent)
           VALUES (?, ?, ?, ?, ?, ?)
