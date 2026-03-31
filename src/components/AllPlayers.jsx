@@ -40,7 +40,7 @@ function AddPlayerModal({ teams, statuses, onSave, onClose }) {
             <h2 className="text-lg font-semibold text-gray-800">Add New Player</h2>
             <span className="text-xs font-medium text-cyan-600">New Registration</span>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+          <button onClick={onClose} aria-label="Close modal" className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
         </div>
 
         {/* Form */}
