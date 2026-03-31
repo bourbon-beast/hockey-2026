@@ -101,7 +101,7 @@ export async function updatePlayer(playerId, data) {
   const updates = { updatedAt: new Date().toISOString() }
   // Map snake_case from components to camelCase in Firestore
   if (data.name !== undefined)                  updates.name = data.name
-  if (data.is_active !== undefined)             updates.isActive = !!data.is_active
+  if (data.is_active !== undefined)             updates.isActive = data.is_active
   if (data.assigned_team_id_2026 !== undefined) updates.assignedTeam2026 = data.assigned_team_id_2026 || null
   if (data.notes !== undefined)                 updates.notes = data.notes || null
   if (data.default_position !== undefined)      updates.defaultPosition = data.default_position || null
@@ -392,7 +392,7 @@ export async function updateSelectionUnavailable(roundId, teamId, playerId, isUn
     return data.teamId === teamId && String(data.playerId) === String(playerId)
   })
   if (target) {
-    await updateDoc(target.ref, { isUnavailable: !!isUnavailable })
+    await updateDoc(target.ref, { isUnavailable: isUnavailable })
   }
 }
 
