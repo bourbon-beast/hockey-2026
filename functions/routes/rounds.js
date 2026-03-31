@@ -49,6 +49,13 @@ router.post('/', async (req, res) => {
           const prevMatch = prevMatches.find(m => m.team_id === t.id) || {}
           matchArgs.push(roundId, t.id, '', prevMatch.time || '', prevMatch.venue || '', '')
         }
+      const prevMatchesMap = new Map()
+      for (const m of prevMatches) {
+        prevMatchesMap.set(m.team_id, m)
+      }
+
+      for (const t of teams) {
+        const prevMatch = prevMatchesMap.get(t.id) || {}
         await run(`
           INSERT INTO round_matches (round_id, team_id, match_date, time, venue, opponent)
           VALUES ${matchPlaceholders}
