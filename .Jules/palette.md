@@ -1,0 +1,3 @@
+## 2025-05-15 - Interactive div elements and keyboard accessibility
+**Learning:** This application uses `<div>` tags extensively for interactive elements, like the `PlayerCard` component, simply by adding an `onClick` handler. This makes them invisible to screen readers and inaccessible to keyboard-only users who rely on Tab navigation.
+**Action:** Always check interactive components built from non-semantic elements (`div`, `span`) to ensure they have `role="button"`, `tabIndex={0}`, an `onKeyDown` handler to support Enter/Space activation, and visible focus states (`focus-visible`). This ensures equivalent functionality for all users.

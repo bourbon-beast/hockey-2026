@@ -11,7 +11,15 @@ const PlayerCard = React.memo(function PlayerCard({ player, statuses, onClick, s
   return (
     <div 
       onClick={onClick}
-      className="flex items-center gap-3 px-3 py-2 bg-white rounded-lg border border-gray-200 hover:border-gray-300 hover:shadow-sm cursor-pointer transition-all"
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onClick && onClick(e)
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      className="flex items-center gap-3 px-3 py-2 bg-white rounded-lg border border-gray-200 hover:border-gray-300 hover:shadow-sm cursor-pointer transition-all focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-none"
     >
       <span 
         className="w-2.5 h-2.5 rounded-full flex-shrink-0" 
