@@ -223,7 +223,11 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
               <p className="text-xs text-gray-400 mt-1">This player won't appear in selection lists</p>
             )}
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none flex-shrink-0">×</button>
+          <button
+            onClick={onClose}
+            aria-label="Close modal"
+            className="text-gray-400 hover:text-gray-600 text-2xl leading-none flex-shrink-0 rounded focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-none"
+          >×</button>
         </div>
 
         {/* ── Body ── */}
