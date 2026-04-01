@@ -1,0 +1,3 @@
+## 2025-05-24 - RoundPlanner Re-render Optimization
+**Learning:** `RoundPlanner.jsx` suffers from severe performance degradation because it derives `getAvailablePlayers`, `playerTeamMap`, and `duplicateIds` on every render. Because the search input triggers state updates on every keystroke, the entire component re-evaluates all filtering, mapping, and heavy UI logic for every single team column and player row, causing significant lag.
+**Action:** Always wrap expensive list-derivation logic (e.g. mapping across hundreds of `allPlayers` and `roundData.selections`) in `useMemo`, especially when the component contains controlled text inputs that force rapid re-renders.
