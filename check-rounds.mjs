@@ -1,8 +1,16 @@
 import { createClient } from '@libsql/client'
 
+const TURSO_URL = process.env.TURSO_URL
+const TURSO_TOKEN = process.env.TURSO_TOKEN
+
+if (!TURSO_URL || !TURSO_TOKEN) {
+  console.error('❌  Set TURSO_URL and TURSO_TOKEN as environment variables before running.')
+  process.exit(1)
+}
+
 const turso = createClient({
-  url: 'libsql://hockey-2026-stevegwaters.aws-ap-northeast-1.turso.io',
-  authToken: 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3NzI3ODEzMjQsImlkIjoiMDE5Y2MyMDAtMTQwMS03NDEzLTk1MGEtNGM0ZDE1NjNmYzY4IiwicmlkIjoiZDhhZjBkMTctYTRiZi00OWU4LWIzN2MtNzNmZTRlNDJmYzY0In0.xz3DBz8A4wiNE5bg4OxSBbqjrEDiFIGLYFtuxfLQQjrOwabY9Qy1Cf972LgVOzMlmTMQgqtrULjTl3g_DVIgAA'
+  url: TURSO_URL.trim(),
+  authToken: TURSO_TOKEN.trim()
 })
 
 const r = await turso.execute('SELECT id, round_number, round_type, name, round_date FROM rounds ORDER BY id')
