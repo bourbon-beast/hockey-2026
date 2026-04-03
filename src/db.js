@@ -36,22 +36,22 @@ export async function getPlayers(includeInactive = false) {
     return {
       id: Number(d.id),
       name: data.name,
-      status_id: null,       // registration field — not migrated
+      status_id: data.statusId || null,
       primary_team_id_2025: data.primaryTeam2025,
       assigned_team_id_2026: data.assignedTeam2026,
       total_games_2025: data.totalGames2025 || 0,
       notes: data.notes,
       default_position: data.defaultPosition,
       is_active: data.isActive ? 1 : 0,
-      is_new_registration: 0,
-      is_international: 0,
-      needs_visa: 0,
-      player_type: null,
-      interested_in: null,
-      previous_club: null,
-      follow_up_ok: null,
-      unsure_reason: null,
-      playing_preference: null,
+      is_new_registration: data.isNewRegistration ? 1 : 0,
+      is_international: data.isInternational ? 1 : 0,
+      needs_visa: data.needsVisa ? 1 : 0,
+      player_type: data.playerType || null,
+      interested_in: data.interestedIn || null,
+      previous_club: data.previousClub || null,
+      follow_up_ok: data.followUpOk ?? null,
+      unsure_reason: data.unsureReason || null,
+      playing_preference: data.playingPreference || null,
       teams_played_2026: data.teamsPlayed2026 || [],
       games_played_2026: data.gamesPlayed2026 || {},
     }
@@ -67,16 +67,24 @@ export async function getPlayer(playerId) {
   return {
     id: Number(snap.id),
     name: data.name,
-    status_id: null,
+    status_id: data.statusId || null,
     primary_team_id_2025: data.primaryTeam2025,
     assigned_team_id_2026: data.assignedTeam2026,
     total_games_2025: data.totalGames2025 || 0,
     notes: data.notes,
     default_position: data.defaultPosition,
     is_active: data.isActive ? 1 : 0,
+    is_new_registration: data.isNewRegistration ? 1 : 0,
+    is_international: data.isInternational ? 1 : 0,
+    needs_visa: data.needsVisa ? 1 : 0,
+    player_type: data.playerType || null,
+    interested_in: data.interestedIn || null,
+    previous_club: data.previousClub || null,
+    follow_up_ok: data.followUpOk ?? null,
+    unsure_reason: data.unsureReason || null,
+    playing_preference: data.playingPreference || null,
     teams_played_2026: data.teamsPlayed2026 || [],
     games_played_2026: data.gamesPlayed2026 || {},
-    // history — no longer stored separately, player doc has the summary
     history: [],
   }
 }
@@ -84,12 +92,22 @@ export async function getPlayer(playerId) {
 export async function createPlayer(data) {
   const ref = await addDoc(collection(db, 'players'), {
     name: data.name,
+    statusId: data.status_id || 'new',
     defaultPosition: data.default_position || null,
     isActive: true,
     assignedTeam2026: data.assigned_team_id_2026 || null,
     primaryTeam2025: null,
     totalGames2025: 0,
     notes: data.notes || null,
+    isNewRegistration: true,
+    isInternational: false,
+    needsVisa: false,
+    playerType: null,
+    interestedIn: null,
+    previousClub: null,
+    followUpOk: null,
+    unsureReason: null,
+    playingPreference: null,
     teamsPlayed2026: [],
     gamesPlayed2026: {},
     createdAt: new Date().toISOString(),
@@ -100,12 +118,21 @@ export async function createPlayer(data) {
 
 export async function updatePlayer(playerId, data) {
   const updates = { updatedAt: new Date().toISOString() }
-  // Map snake_case from components to camelCase in Firestore
   if (data.name !== undefined)                  updates.name = data.name
   if (data.is_active !== undefined)             updates.isActive = data.is_active
+  if (data.status_id !== undefined)             updates.statusId = data.status_id || null
   if (data.assigned_team_id_2026 !== undefined) updates.assignedTeam2026 = data.assigned_team_id_2026 || null
   if (data.notes !== undefined)                 updates.notes = data.notes || null
   if (data.default_position !== undefined)      updates.defaultPosition = data.default_position || null
+  if (data.is_new_registration !== undefined)   updates.isNewRegistration = !!data.is_new_registration
+  if (data.is_international !== undefined)      updates.isInternational = !!data.is_international
+  if (data.needs_visa !== undefined)            updates.needsVisa = !!data.needs_visa
+  if (data.player_type !== undefined)           updates.playerType = data.player_type || null
+  if (data.interested_in !== undefined)         updates.interestedIn = data.interested_in || null
+  if (data.previous_club !== undefined)         updates.previousClub = data.previous_club || null
+  if (data.follow_up_ok !== undefined)          updates.followUpOk = data.follow_up_ok ?? null
+  if (data.unsure_reason !== undefined)         updates.unsureReason = data.unsure_reason || null
+  if (data.playing_preference !== undefined)    updates.playingPreference = data.playing_preference || null
   await updateDoc(doc(db, 'players', String(playerId)), updates)
 }
 

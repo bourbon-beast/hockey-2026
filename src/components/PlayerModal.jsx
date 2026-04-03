@@ -169,10 +169,21 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
     if (!form.name.trim()) return
     setSaving(true)
     await updatePlayer(player.id, {
-      name: form.name.trim(),
-      is_active: form.is_active,
+      name:                  form.name.trim(),
+      is_active:             form.is_active,
+      status_id:             form.status_id || null,
       assigned_team_id_2026: form.assigned_team_id_2026 || null,
-      notes: form.notes || null,
+      notes:                 form.notes || null,
+      default_position:      player.default_position || null,
+      is_new_registration:   form.is_new_registration,
+      is_international:      form.is_international,
+      needs_visa:            form.needs_visa,
+      player_type:           form.player_type || null,
+      interested_in:         form.interested_in || null,
+      previous_club:         form.previous_club || null,
+      follow_up_ok:          form.follow_up_ok === 'yes' ? true : form.follow_up_ok === 'no' ? false : null,
+      unsure_reason:         form.unsure_reason || null,
+      playing_preference:    form.playing_preference || null,
     })
     setSaving(false)
     onPlayerUpdated?.()
