@@ -1,16 +1,10 @@
-Fix 3 bugs in new player creation and picker display
+Backfill statusId and survey fields onto Firestore player docs
 
-1. Unavailability rounds all showing as marked (PlayerModal)
-   - unavailMap was keyed by Number(round_id) but Firestore round
-     IDs are strings - Number("abc123") = NaN, collapsing all
-     rounds to the same key. Changed to String() keys throughout.
+Ran one-time patch-status.mjs to write statusId (and all other
+survey fields: isNewRegistration, isInternational, needsVisa,
+playerType, interestedIn, previousClub, followUpOk, unsureReason,
+playingPreference) from Turso export onto all 149 existing
+Firestore player docs. 149/149 updated, 0 skipped.
 
-2. New player not visible after save (AllPlayers)
-   - handlePlayerAdded was setting statusFilter to 'new' which
-     matches no players in Firestore (status_id is null for all).
-     Changed to reset filter to 'all' so new player is visible.
-
-3. Wrong team label shown in picker (PE instead of PB)
-   - Picker team badge was showing playerTeamMap first (current
-     round placement) which could show an older team. Changed
-     priority to: assigned_team_id_2026 > current round > history.
+Also added service account key pattern and temp patch files to
+.gitignore.

@@ -16,6 +16,8 @@ firebase-debug.log
 
 # Service account / secrets (never commit)
 *-firebase-adminsdk-*.json
+patch-status-data.json
+run-patch.cmd
 
 # IDE
 .idea/
