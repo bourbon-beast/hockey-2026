@@ -1,21 +1,9 @@
 import { useState, useEffect } from 'react'
-import { DndContext, DragOverlay, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
-import PlayerCard from './PlayerCard'
-import DroppableArea from './DroppableArea'
-import DraggablePlayer from './DraggablePlayer'
-import { getTeamPlayers, updatePlayer } from '../db'
+import { getTeamPlayers } from '../db'
 
-export default function TeamView({ teams, statuses, selectedTeam, onSelectTeam, onSelectPlayer, refreshKey, onRefresh }) {
+export default function TeamView({ teams, statuses, selectedTeam, onSelectTeam, onSelectPlayer, refreshKey }) {
   const [teamData, setTeamData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [activePlayer, setActivePlayer] = useState(null)
-  const [filterStatus, setFilterStatus] = useState(null) // null = all, or status_id
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 8 },
-    })
-  )
 
   useEffect(() => {
     setLoading(true)
@@ -26,223 +14,98 @@ export default function TeamView({ teams, statuses, selectedTeam, onSelectTeam, 
       })
   }, [selectedTeam, refreshKey])
 
-  const handleDragStart = (event) => {
-    const player = findPlayer(event.active.id)
-    setActivePlayer(player)
-  }
-
-  const handleDragEnd = (event) => {
-    const { active, over } = event
-    setActivePlayer(null)
-
-    if (!over) return
-
-    const playerId = active.id
-    const targetArea = over.id
-
-    if (targetArea === 'squad-2026') {
-      updatePlayer(playerId, { assigned_team_id_2026: selectedTeam }).then(() => onRefresh())
-    } else if (targetArea === 'unassigned') {
-      updatePlayer(playerId, { assigned_team_id_2026: null }).then(() => onRefresh())
-    }
-  }
-
-  const findPlayer = (id) => {
-    if (!teamData) return null
-    const all = [...teamData.mainSquad, ...teamData.fillIns, ...teamData.squad2026]
-    return all.find(p => p.id === id)
-  }
-
-  const filterPlayers = (players) => {
-    if (!filterStatus) return players
-    return players.filter(p => p.status_id === filterStatus)
-  }
-
-  const getStatusCounts = (players) => {
-    const counts = {}
-    players.forEach(p => {
-      counts[p.status_id] = (counts[p.status_id] || 0) + 1
-    })
-    return counts
-  }
-
-  const toggleFilter = (statusId) => {
-    setFilterStatus(current => current === statusId ? null : statusId)
-  }
-
   if (loading || !teamData) {
-    return <div className="text-gray-500">Loading...</div>
+    return <div className="text-slate-400 py-12 text-center text-sm">Loading squad…</div>
   }
 
   const team = teams.find(t => t.id === selectedTeam)
-  const statusCounts = getStatusCounts(teamData.mainSquad)
+
+  const PlayerRow = ({ player, showPrimary = false }) => (
+    <div
+      onClick={() => onSelectPlayer && onSelectPlayer(player)}
+      className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer border border-transparent hover:border-slate-200 transition-colors"
+    >
+      <div className="flex-1 min-w-0">
+        <span className="text-sm font-medium text-slate-800 truncate block">{player.name}</span>
+        {showPrimary && player.primary_team_id_2025 && (
+          <span className="text-xs text-slate-400">2025: {player.primary_team_id_2025}</span>
+        )}
+      </div>
+      {player.default_position && (
+        <span className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded font-mono">
+          {player.default_position}
+        </span>
+      )}
+      {player.games_played_2026 && Object.keys(player.games_played_2026).length > 0 && (
+        <span className="text-xs text-blue-600 font-semibold w-6 text-right">
+          {Object.values(player.games_played_2026).reduce((a, b) => a + b, 0)}g
+        </span>
+      )}
+    </div>
+  )
+
 
   return (
-    <DndContext 
-      sensors={sensors}
-      collisionDetection={closestCenter}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
-    >
-      <div>
-        {/* Team tabs */}
-        <div className="flex gap-1 mb-6">
-          {teams.filter(t => t.id !== 'NEW').map(t => (
-            <button
-              key={t.id}
-              onClick={() => onSelectTeam(t.id)}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                selectedTeam === t.id
-                  ? 'bg-gray-800 text-white'
-                  : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200'
-              }`}
-            >
-              {t.id}
-            </button>
-          ))}
-        </div>
+    <div className="space-y-4">
 
-        {/* Status filter chips */}
-        <div className="flex flex-wrap gap-2 mb-4">
+      {/* Team tabs */}
+      <div className="flex flex-wrap gap-1.5">
+        {teams.filter(t => t.id !== 'NEW').map(t => (
           <button
-            onClick={() => setFilterStatus(null)}
-            className={`px-3 py-1.5 text-sm rounded-full transition-colors ${
-              !filterStatus 
-                ? 'bg-gray-800 text-white' 
-                : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+            key={t.id}
+            onClick={() => onSelectTeam(t.id)}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              selectedTeam === t.id
+                ? 'bg-slate-800 text-white'
+                : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
             }`}
           >
-            All ({teamData.mainSquad.length})
+            {t.id}
           </button>
-          {statuses.map(s => {
-            const count = statusCounts[s.id] || 0
-            if (count === 0) return null
-            const isActive = filterStatus === s.id
-            return (
-              <button
-                key={s.id}
-                onClick={() => toggleFilter(s.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-full transition-all ${
-                  isActive 
-                    ? 'ring-2 ring-offset-1' 
-                    : 'hover:opacity-80'
-                }`}
-                style={{ 
-                  backgroundColor: isActive ? s.color : s.color + '20',
-                  color: isActive ? 'white' : s.color,
-                  ringColor: s.color
-                }}
-              >
-                <span 
-                  className="w-2 h-2 rounded-full" 
-                  style={{ backgroundColor: isActive ? 'white' : s.color }}
-                />
-                {s.label} ({count})
-              </button>
-            )
-          })}
-        </div>
-
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">{team?.name}</h2>
-
-        <div className="grid grid-cols-2 gap-6">
-          {/* Left side - 2025 data */}
-          <div className="space-y-6">
-            {/* Main Squad 2025 */}
-            <DroppableArea 
-              id="unassigned" 
-              label={
-                <div className="flex items-center justify-between w-full">
-                  <span>2025 Main Squad</span>
-                  <span className="text-gray-500 text-sm">
-                    {filterStatus 
-                      ? `${filterPlayers(teamData.mainSquad).length} of ${teamData.mainSquad.length}`
-                      : `${teamData.mainSquad.length} players`
-                    }
-                  </span>
-                </div>
-              }
-            >
-              <div className="space-y-1">
-                {filterPlayers(teamData.mainSquad).map(player => (
-                  <DraggablePlayer key={player.id} player={player}>
-                    <PlayerCard 
-                      player={player} 
-                      statuses={statuses}
-                      onClick={() => onSelectPlayer(player)}
-                    />
-                  </DraggablePlayer>
-                ))}
-                {filterPlayers(teamData.mainSquad).length === 0 && (
-                  <p className="text-gray-400 text-sm py-2">No players match filter</p>
-                )}
-              </div>
-            </DroppableArea>
-
-            {/* Fill-ins 2025 */}
-            <DroppableArea 
-              id="fillins" 
-              label={`2025 Fill-ins (${teamData.fillIns.length})`}
-            >
-              <div className="space-y-1">
-                {filterPlayers(teamData.fillIns).map(player => (
-                  <DraggablePlayer key={player.id} player={player}>
-                    <PlayerCard 
-                      player={player} 
-                      statuses={statuses}
-                      onClick={() => onSelectPlayer(player)}
-                      showPrimaryTeam
-                    />
-                  </DraggablePlayer>
-                ))}
-                {teamData.fillIns.length === 0 && (
-                  <p className="text-gray-400 text-sm py-2">No fill-ins</p>
-                )}
-              </div>
-            </DroppableArea>
-          </div>
-
-          {/* Right side - 2026 squad */}
-          <DroppableArea 
-            id="squad-2026" 
-            label={
-              <div className="flex items-center justify-between w-full">
-                <span>2026 Squad</span>
-                <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded">
-                  {teamData.squad2026.length} players
-                </span>
-              </div>
-            } 
-            highlight
-          >
-            <div className="space-y-1 min-h-[200px]">
-              {teamData.squad2026.map(player => (
-                <DraggablePlayer key={player.id} player={player}>
-                  <PlayerCard 
-                    player={player} 
-                    statuses={statuses}
-                    onClick={() => onSelectPlayer(player)}
-                    showPrimaryTeam={player.primary_team_id_2025 !== selectedTeam}
-                  />
-                </DraggablePlayer>
-              ))}
-              {teamData.squad2026.length === 0 && (
-                <p className="text-gray-400 text-sm py-4 text-center">
-                  Drag players here to assign to 2026 squad
-                </p>
-              )}
-            </div>
-          </DroppableArea>
-        </div>
+        ))}
       </div>
 
-      <DragOverlay>
-        {activePlayer ? (
-          <div className="opacity-80">
-            <PlayerCard player={activePlayer} statuses={statuses} />
+      <h2 className="text-base font-semibold text-slate-700">{team?.name}</h2>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+        {/* 2026 Squad — derived from round selections */}
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
+            <span className="text-sm font-semibold text-slate-700">2026 Squad</span>
+            <span className="text-xs bg-blue-100 text-blue-700 font-semibold px-2 py-0.5 rounded">
+              {teamData.squad2026.length} players
+            </span>
           </div>
-        ) : null}
-      </DragOverlay>
-    </DndContext>
+          <div className="p-2 space-y-0.5">
+            {teamData.squad2026.map(p => (
+              <PlayerRow key={p.id} player={p} showPrimary={p.primary_team_id_2025 !== selectedTeam} />
+            ))}
+            {teamData.squad2026.length === 0 && (
+              <p className="text-slate-400 text-sm py-6 text-center">
+                No players selected for this team yet
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* 2025 Main Squad — for reference */}
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
+            <span className="text-sm font-semibold text-slate-700">2025 Main Squad</span>
+            <span className="text-xs text-slate-500">{teamData.mainSquad.length} players</span>
+          </div>
+          <div className="p-2 space-y-0.5">
+            {teamData.mainSquad.map(p => (
+              <PlayerRow key={p.id} player={p} />
+            ))}
+            {teamData.mainSquad.length === 0 && (
+              <p className="text-slate-400 text-sm py-6 text-center">No 2025 data</p>
+            )}
+          </div>
+        </div>
+
+      </div>
+    </div>
   )
 }
