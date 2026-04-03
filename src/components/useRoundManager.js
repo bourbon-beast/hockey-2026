@@ -1,0 +1,459 @@
+// useRoundManager.js
+import { useState, useEffect, useRef } from 'react'
+import * as DB from '../db'
+import { carryForwardSelections } from '../db'
+
+export function useRoundManager() {
+    const [teams, setTeams] = useState([])
+    const [allPlayers, setAllPlayers] = useState([])
+    const [rounds, setRounds] = useState([])
+    const [currentRound, setCurrentRound] = useState(null)
+    const [roundData, setRoundData] = useState(null)
+    const [loading, setLoading] = useState(true)
+    const [roundUnavailability, setRoundUnavailability] = useState({})
+
+    // Drag State
+    const [draggedPlayer, setDraggedPlayer] = useState(null)
+    const [dragOverInfo, setDragOverInfo] = useState(null)
+    const touchDragRef = useRef(null)
+    const touchScrollLocked = useRef(false)
+
+    useEffect(() => {
+        Promise.all([
+            DB.getTeams(),
+            DB.getPlayers(true),
+            DB.getRounds()
+        ]).then(([teamsData, playersData, roundsData]) => {
+            setTeams(teamsData.filter(t => t.id !== 'NEW'))
+            setAllPlayers(playersData)
+            setRounds(roundsData)
+            const today = new Date().toISOString().split('T')[0]
+            const season = roundsData.filter(r => r.round_type === 'season')
+            const upcoming = season.find(r => r.round_date && r.round_date >= today)
+            setCurrentRound(upcoming || season[season.length - 1] || roundsData[roundsData.length - 1])
+            setLoading(false)
+        })
+    }, [])
+
+    useEffect(() => {
+        if (currentRound) {
+            DB.getRoundDetail(currentRound.id, allPlayers).then(setRoundData)
+            DB.getUnavailability({ round_id: currentRound.id })
+                .then(data => {
+                    const map = {}
+                    data.forEach(u => { map[Number(u.player_id)] = u.days || 'both' })
+                    setRoundUnavailability(map)
+                })
+        } else {
+            setRoundData(null)
+            setRoundUnavailability({})
+        }
+    }, [currentRound, allPlayers])
+
+    const seasonRounds = rounds.filter(r => r.round_type === 'season')
+    const practiceRounds = rounds.filter(r => r.round_type === 'practice')
+
+    // ── Database Actions ──
+    const createRound = async (body) => {
+        try {
+            const newRound = await DB.createRound(body, teams)
+            setRounds([...rounds, newRound])
+            setCurrentRound(newRound)
+        } catch (err) {
+            alert(`Failed to create round: ${err.message}`)
+        }
+    }
+
+    const deleteRound = async () => {
+        if (!currentRound) return
+        await DB.deleteRound(currentRound.id)
+        const remaining = rounds.filter(r => r.id !== currentRound.id)
+        setRounds(remaining)
+        setCurrentRound(remaining.length > 0 ? remaining[remaining.length - 1] : null)
+    }
+
+    const updateRound = async (body) => {
+        if (!currentRound) return
+        const updated = await DB.updateRound(currentRound.id, body)
+        setRounds(rounds.map(r => r.id === updated.id ? updated : r))
+        setCurrentRound(updated)
+    }
+
+    const carryForward = async (carryForwardTeams) => {
+        if (!currentRound || carryForwardTeams.length === 0) return null
+        const idx = seasonRounds.findIndex(r => r.id === currentRound.id)
+        const nextRound = seasonRounds[idx + 1]
+        if (!nextRound) return null
+
+        const result = await carryForwardSelections(currentRound.id, nextRound.id, carryForwardTeams)
+        if (currentRound.id === nextRound.id) {
+            const fresh = await DB.getRoundDetail(currentRound.id, allPlayers)
+            setRoundData(fresh)
+        }
+        return { ...result, nextLabel: `Round ${nextRound.round_number}` }
+    }
+
+    const updateMatchDetails = async (teamId, data) => {
+        if (!roundData) return
+        await DB.updateMatchDetails(currentRound.id, teamId, data)
+        setRoundData({
+            ...roundData,
+            matches: roundData.matches.map(m => m.team_id === teamId ? { ...m, ...data } : m)
+        })
+    }
+
+    const getTeamSelectionsOrdered = (teamId) => {
+        if (!roundData?.selections) return []
+        return roundData.selections
+            .filter(s => s.team_id === teamId)
+            .sort((a, b) => a.slot_number - b.slot_number)
+    }
+
+    const addPlayers = async (teamId, selectedIdsArray) => {
+        if (!currentRound || selectedIdsArray.length === 0) return
+        const existingSels = getTeamSelectionsOrdered(teamId)
+        let nextSlot = existingSels.length > 0 ? Math.max(...existingSels.map(s => s.slot_number || 0)) + 1 : 1
+
+        const toAdd = selectedIdsArray.map(playerId => {
+            const player = allPlayers.find(p => p.id === playerId) || { id: playerId, name: '?' }
+            const entry = { team_id: teamId, player_id: playerId, slot_number: nextSlot++ }
+            return { entry, player }
+        })
+
+        setRoundData(prev => {
+            if (!prev) return prev
+            const newSels = toAdd.map(({ entry, player }) => ({
+                id: `optimistic-${entry.player_id}`, round_id: currentRound.id, team_id: teamId,
+                player_id: entry.player_id, slot_number: entry.slot_number, position: null,
+                confirmed: 0, is_unavailable: 0, name: player.name,
+                default_position: player.default_position || null, status_id: null,
+            }))
+            return { ...prev, selections: [...prev.selections, ...newSels] }
+        })
+
+        try {
+            await DB.addSelectionBatch(currentRound.id, toAdd.map(t => t.entry))
+            const fresh = await DB.getRoundDetail(currentRound.id, allPlayers)
+            setRoundData(fresh)
+            setAllPlayers(prev => prev.map(p => {
+                if (!toAdd.find(t => t.entry.player_id === p.id)) return p
+                const already = Array.isArray(p.teams_played_2026) ? p.teams_played_2026 : []
+                if (already.includes(teamId)) return p
+                return { ...p, teams_played_2026: [...already, teamId] }
+            }))
+        } catch (err) {
+            console.error('Failed to add players', err)
+            const fresh = await DB.getRoundDetail(currentRound.id, allPlayers)
+            setRoundData(fresh)
+        }
+    }
+
+    const removePlayer = (teamId, playerId) => {
+        if (!currentRound) return
+        setRoundData(prev => {
+            if (!prev) return prev
+            const sels = prev.selections.filter(s => !(s.team_id === teamId && s.player_id === playerId))
+            const teamSels = sels.filter(s => s.team_id === teamId).sort((a, b) => a.slot_number - b.slot_number)
+            teamSels.forEach((s, i) => { s.slot_number = i + 1 })
+            return { ...prev, selections: sels }
+        })
+        DB.removeSelection(currentRound.id, teamId, playerId).catch(err => {
+            console.error('Remove failed:', err)
+            DB.getRoundDetail(currentRound.id, allPlayers).then(setRoundData)
+        })
+    }
+
+    const markSelectionUnavailable = async (teamId, playerId, isUnavailable) => {
+        if (!currentRound) return
+        setRoundData(prev => ({
+            ...prev,
+            selections: prev.selections.map(s =>
+                s.team_id === teamId && s.player_id === playerId ? { ...s, is_unavailable: isUnavailable ? 1 : 0 } : s
+            )
+        }))
+        await DB.updateSelectionUnavailable(currentRound.id, teamId, playerId, isUnavailable).catch(() => {
+            DB.getRoundDetail(currentRound.id, allPlayers).then(setRoundData)
+        })
+    }
+
+    const toggleConfirmed = async (teamId, playerId) => {
+        if (!currentRound) return
+        const confirmed = await DB.toggleSelectionConfirmed(currentRound.id, teamId, playerId)
+        setRoundData(prev => ({
+            ...prev,
+            selections: prev.selections.map(s => s.team_id === teamId && s.player_id === playerId ? { ...s, confirmed } : s)
+        }))
+    }
+
+    const updatePosition = async (playerId, position) => {
+        if (!currentRound) return
+        await DB.updateSelectionPosition(currentRound.id, playerId, position)
+        setRoundData(prev => ({
+            ...prev,
+            selections: prev.selections.map(s => s.player_id === playerId ? { ...s, position } : s)
+        }))
+    }
+
+    // ── Drag & Drop Handlers ──
+    const handleDragStart = (e, selection, fromTeamId, fromBucket = false) => {
+        setDraggedPlayer({ playerId: selection.player_id, fromTeamId, fromBucket })
+        e.dataTransfer.effectAllowed = 'move'
+    }
+
+    const handleDragOverRow = (e, teamId, playerId) => {
+        e.preventDefault()
+        e.stopPropagation()
+        e.dataTransfer.dropEffect = 'move'
+        const rect = e.currentTarget.getBoundingClientRect()
+        const relY = e.clientY - rect.top
+        const threshold = rect.height * 0.3
+        if (relY > threshold && relY < rect.height - threshold) return
+        const position = relY <= threshold ? 'above' : 'below'
+        setDragOverInfo(prev => {
+            if (prev?.teamId === teamId && prev?.playerId === playerId && prev?.position === position) return prev
+            return { teamId, playerId, position }
+        })
+    }
+
+    const handleDragOverEmpty = (e, teamId) => {
+        e.preventDefault()
+        e.stopPropagation()
+        e.dataTransfer.dropEffect = 'move'
+        setDragOverInfo({ teamId, empty: true })
+    }
+
+    const handleDragOverColumn = (e, teamId) => {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        if (!dragOverInfo || dragOverInfo.teamId !== teamId) setDragOverInfo({ teamId, empty: true })
+    }
+
+    const handleDropToBucket = (e, teamId) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setDragOverInfo(null)
+        if (!draggedPlayer || draggedPlayer.fromBucket) return
+        if (draggedPlayer.fromTeamId !== teamId) return
+        const { playerId } = draggedPlayer
+        setDraggedPlayer(null)
+        markSelectionUnavailable(teamId, playerId, true)
+    }
+
+    const handleDrop = (e, targetTeamId, targetPlayerId) => {
+        e.preventDefault()
+        e.stopPropagation()
+        let insertAfter = true
+        if (targetPlayerId !== null) {
+            const rect = e.currentTarget.getBoundingClientRect()
+            insertAfter = e.clientY >= rect.top + rect.height / 2
+        }
+        setDragOverInfo(null)
+        if (!draggedPlayer || !currentRound) return
+        const { playerId, fromTeamId } = draggedPlayer
+        if (fromTeamId === targetTeamId && Number(playerId) === Number(targetPlayerId)) return
+
+        if (draggedPlayer.fromBucket) {
+            setDraggedPlayer(null)
+            markSelectionUnavailable(fromTeamId, playerId, false)
+            return
+        }
+
+        setDraggedPlayer(null)
+
+        setRoundData(prev => {
+            if (!prev) return prev
+            const sels = [...prev.selections]
+            const movingIdx = sels.findIndex(s => s.player_id === playerId && s.team_id === fromTeamId)
+            if (movingIdx === -1) return prev
+            const [moving] = sels.splice(movingIdx, 1)
+            moving.team_id = targetTeamId
+
+            const targetSels = sels.filter(s => s.team_id === targetTeamId).sort((a, b) => a.slot_number - b.slot_number)
+            const otherSels  = sels.filter(s => !(s.team_id === targetTeamId))
+
+            let insertIdx = targetSels.length
+            if (targetPlayerId !== null) {
+                const targetIdx = targetSels.findIndex(s => s.player_id === targetPlayerId)
+                if (targetIdx !== -1) insertIdx = insertAfter ? targetIdx + 1 : targetIdx
+            }
+
+            targetSels.splice(insertIdx, 0, moving)
+            targetSels.forEach((s, i) => { s.slot_number = i + 1 })
+            if (fromTeamId !== targetTeamId) {
+                const fromSels = otherSels.filter(s => s.team_id === fromTeamId).sort((a, b) => a.slot_number - b.slot_number)
+                fromSels.forEach((s, i) => { s.slot_number = i + 1 })
+            }
+
+            return { ...prev, selections: [...otherSels, ...targetSels] }
+        })
+
+        DB.moveSelection(currentRound.id, {
+            playerId, from_team_id: fromTeamId, target_team_id: targetTeamId,
+            target_player_id: targetPlayerId || null, insert_after: insertAfter,
+        }).catch(err => {
+            console.error('Drop sync failed:', err)
+            DB.getRoundDetail(currentRound.id, allPlayers).then(setRoundData)
+        })
+    }
+
+    const handleDragEnd = () => {
+        setDraggedPlayer(null)
+        setDragOverInfo(null)
+    }
+
+    const createGhost = (name) => {
+        const el = document.createElement('div')
+        el.textContent = name
+        el.style.cssText = `position:fixed; z-index:9999; pointer-events:none; background:#1e3a8a; color:#fff; font-size:13px; font-weight:600; padding:6px 14px; border-radius:20px; white-space:nowrap; box-shadow:0 4px 16px rgba(0,0,0,0.35); opacity:0.92; transform:translate(-50%,-50%);`
+        document.body.appendChild(el)
+        return el
+    }
+
+    const handleTouchStart = (e, selection, fromTeamId, fromBucket = false) => {
+        if (e.target.closest('button, select')) return
+        const touch = e.touches[0]
+        const ghostEl = createGhost(selection.name)
+        ghostEl.style.left = touch.clientX + 'px'
+        ghostEl.style.top  = touch.clientY + 'px'
+        touchDragRef.current = { playerId: selection.player_id, fromTeamId, fromBucket, ghostEl }
+        touchScrollLocked.current = false
+        setDraggedPlayer({ playerId: selection.player_id, fromTeamId, fromBucket })
+    }
+
+    const handleTouchMove = (e) => {
+        if (!touchDragRef.current) return
+        const touch = e.touches[0]
+        if (!touchScrollLocked.current) touchScrollLocked.current = true
+        e.preventDefault()
+        const { ghostEl } = touchDragRef.current
+        if (ghostEl) {
+            ghostEl.style.left = touch.clientX + 'px'
+            ghostEl.style.top  = touch.clientY + 'px'
+        }
+        ghostEl.style.display = 'none'
+        const elUnder = document.elementFromPoint(touch.clientX, touch.clientY)
+        ghostEl.style.display = ''
+        const playerRow = elUnder?.closest('[data-player-id]')
+        const column    = elUnder?.closest('[data-team-id]')
+        const bucket    = elUnder?.closest('[data-bucket-team]')
+
+        if (bucket) {
+            setDragOverInfo({ teamId: bucket.dataset.bucketTeam, bucket: true })
+        } else if (playerRow) {
+            const rect = playerRow.getBoundingClientRect()
+            const position = touch.clientY < rect.top + rect.height / 2 ? 'above' : 'below'
+            setDragOverInfo({ teamId: playerRow.dataset.teamId, playerId: Number(playerRow.dataset.playerId), position })
+        } else if (column) {
+            setDragOverInfo({ teamId: column.dataset.teamId, empty: true })
+        } else {
+            setDragOverInfo(null)
+        }
+    }
+
+    const handleTouchEnd = (e) => {
+        if (!touchDragRef.current) return
+        const { ghostEl, playerId, fromTeamId, fromBucket } = touchDragRef.current
+        if (ghostEl) ghostEl.remove()
+        touchDragRef.current = null
+        touchScrollLocked.current = false
+
+        const info = dragOverInfo
+        setDraggedPlayer(null)
+        setDragOverInfo(null)
+
+        if (!info) return
+        if (info.bucket) {
+            if (!fromBucket && info.teamId === fromTeamId) markSelectionUnavailable(fromTeamId, playerId, true)
+            return
+        }
+        if (fromBucket) {
+            markSelectionUnavailable(fromTeamId, playerId, false)
+            return
+        }
+
+        const targetTeamId   = info.teamId
+        const targetPlayerId = info.playerId || null
+        const insertAfter    = info.position === 'below' || info.empty
+
+        if (fromTeamId === targetTeamId && Number(playerId) === Number(targetPlayerId)) return
+
+        setRoundData(prev => {
+            if (!prev) return prev
+            const sels = [...prev.selections]
+            const movingIdx = sels.findIndex(s => s.player_id === playerId && s.team_id === fromTeamId)
+            if (movingIdx === -1) return prev
+            const [moving] = sels.splice(movingIdx, 1)
+            moving.team_id = targetTeamId
+            const targetSels = sels.filter(s => s.team_id === targetTeamId).sort((a, b) => a.slot_number - b.slot_number)
+            const otherSels  = sels.filter(s => s.team_id !== targetTeamId)
+            let insertIdx = targetSels.length
+            if (targetPlayerId !== null) {
+                const ti = targetSels.findIndex(s => s.player_id === targetPlayerId)
+                if (ti !== -1) insertIdx = insertAfter ? ti + 1 : ti
+            }
+            targetSels.splice(insertIdx, 0, moving)
+            targetSels.forEach((s, i) => { s.slot_number = i + 1 })
+            if (fromTeamId !== targetTeamId) {
+                const fromSels = otherSels.filter(s => s.team_id === fromTeamId).sort((a, b) => a.slot_number - b.slot_number)
+                fromSels.forEach((s, i) => { s.slot_number = i + 1 })
+            }
+            return { ...prev, selections: [...otherSels, ...targetSels] }
+        })
+
+        DB.moveSelection(currentRound.id, {
+            playerId, from_team_id: fromTeamId, target_team_id: targetTeamId,
+            target_player_id: targetPlayerId, insert_after: insertAfter,
+        }).catch(() => {
+            DB.getRoundDetail(currentRound.id, allPlayers).then(setRoundData)
+        })
+    }
+
+    // ── Getters ──
+    const getTeamCounts = (teamId) => {
+        if (!roundData) return { total: 0, confirmed: 0, waiting: 0, unavailable: 0, unavailableBucket: 0 }
+        const sels = roundData.selections.filter(s => s.team_id === teamId)
+        const activeSels = sels.filter(s => !s.is_unavailable)
+        return {
+            total: activeSels.length,
+            confirmed: activeSels.filter(s => (s.confirmed ?? 0) === 2).length,
+            waiting: activeSels.filter(s => (s.confirmed ?? 0) === 1).length,
+            unavailable: activeSels.filter(s => (s.confirmed ?? 0) === 3).length,
+            unavailableBucket: sels.filter(s => s.is_unavailable).length,
+        }
+    }
+
+    const getPositionCounts = (teamId) => {
+        if (!roundData) return {}
+        const counts = {}
+        roundData.selections.filter(s => s.team_id === teamId && s.position).forEach(s => { counts[s.position] = (counts[s.position] || 0) + 1 })
+        return counts
+    }
+
+    const getDuplicatePlayerIds = () => {
+        if (!roundData) return new Set()
+        const counts = {}
+        roundData.selections.forEach(s => { counts[s.player_id] = (counts[s.player_id] || 0) + 1 })
+        return new Set(Object.entries(counts).filter(([, c]) => c > 1).map(([id]) => Number(id)))
+    }
+
+    const getTeamActiveSelections = (teamId) => roundData?.selections ? roundData.selections.filter(s => s.team_id === teamId && !s.is_unavailable).sort((a, b) => a.slot_number - b.slot_number) : []
+    const getTeamUnavailableSelections = (teamId) => roundData?.selections ? roundData.selections.filter(s => s.team_id === teamId && s.is_unavailable).sort((a, b) => a.slot_number - b.slot_number) : []
+    const getMatchDetails = (teamId) => roundData ? (roundData.matches.find(m => m.team_id === teamId) || {}) : {}
+
+    return {
+        state: {
+            teams, allPlayers, rounds, currentRound, roundData, loading, roundUnavailability,
+            draggedPlayer, dragOverInfo, seasonRounds, practiceRounds
+        },
+        actions: {
+            setCurrentRound, createRound, deleteRound, updateRound, carryForward, updateMatchDetails,
+            addPlayers, removePlayer, markSelectionUnavailable, toggleConfirmed, updatePosition,
+            handleDragStart, handleDragOverRow, handleDragOverEmpty, handleDragOverColumn,
+            handleDropToBucket, handleDrop, handleDragEnd, handleTouchStart, handleTouchMove, handleTouchEnd
+        },
+        getters: {
+            getTeamCounts, getPositionCounts, getDuplicatePlayerIds, getTeamActiveSelections,
+            getTeamUnavailableSelections, getMatchDetails
+        }
+    }
+}
