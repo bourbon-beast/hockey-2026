@@ -3,7 +3,7 @@
 import { db } from './firebase'
 import {
   collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
-  addDoc, query, where, orderBy, writeBatch, deleteField
+  addDoc, query, where, orderBy, writeBatch, deleteField, arrayUnion
 } from 'firebase/firestore'
 import { getNextConfirmedState } from './utils.js'
 
@@ -335,6 +335,7 @@ export async function updateMatchDetails(roundId, teamId, data) {
 // ─── Selections ──────────────────────────────────────────────────────────────
 
 // Add multiple selections in a single Firestore batch (much faster than sequential adds)
+// Also updates teamsPlayed2026 on each player doc so they appear in team quick-select filters
 export async function addSelectionBatch(roundId, players) {
   // players: [{ team_id, player_id, slot_number }, ...]
   const batch = writeBatch(db)
@@ -350,13 +351,20 @@ export async function addSelectionBatch(roundId, players) {
       isUnavailable: false,
     })
     ids.push(ref.id)
+    // Atomically add team to player's teamsPlayed2026 array (arrayUnion is idempotent)
+    batch.update(doc(db, 'players', String(player_id)), {
+      teamsPlayed2026: arrayUnion(team_id),
+      updatedAt: new Date().toISOString(),
+    })
   }
   await batch.commit()
   return ids
 }
 
 export async function addSelection(roundId, { team_id, player_id, slot_number }) {
-  const ref = await addDoc(collection(db, 'rounds', String(roundId), 'selections'), {
+  const batch = writeBatch(db)
+  const selRef = doc(collection(db, 'rounds', String(roundId), 'selections'))
+  batch.set(selRef, {
     teamId: team_id,
     playerId: String(player_id),
     slotNumber: slot_number,
@@ -364,7 +372,13 @@ export async function addSelection(roundId, { team_id, player_id, slot_number })
     confirmed: false,
     isUnavailable: false,
   })
-  return { id: ref.id }
+  // Keep teamsPlayed2026 in sync (arrayUnion is idempotent — safe to call every time)
+  batch.update(doc(db, 'players', String(player_id)), {
+    teamsPlayed2026: arrayUnion(team_id),
+    updatedAt: new Date().toISOString(),
+  })
+  await batch.commit()
+  return { id: selRef.id }
 }
 
 export async function removeSelection(roundId, teamId, playerId) {

@@ -1,12 +1,10 @@
 # Dependencies
 node_modules/
-functions/node_modules/
-migration/node_modules/
 
 # Build output
 dist/
 
-# Environment variables (never commit these)
+# Environment variables
 .env
 .env.local
 .env.*.local
@@ -14,11 +12,10 @@ dist/
 # Firebase
 .firebase/
 .firebaserc.local
+firebase-debug.log
 
-# Service account keys
-migration/*.json
-!migration/package.json
-!migration/package-lock.json
+# Service account / secrets (never commit)
+*-firebase-adminsdk-*.json
 
 # IDE
 .idea/
@@ -31,4 +28,3 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
-migration/*.json

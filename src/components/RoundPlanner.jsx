@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import * as DB from '../db'
 import { carryForwardSelections } from '../db'
 
@@ -81,8 +81,8 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
     }
   }, [pickerOpen])
 
-  const seasonRounds = useMemo(() => rounds.filter(r => r.round_type === 'season'), [rounds])
-  const practiceRounds = useMemo(() => rounds.filter(r => r.round_type === 'practice'), [rounds])
+  const seasonRounds = rounds.filter(r => r.round_type === 'season')
+  const practiceRounds = rounds.filter(r => r.round_type === 'practice')
 
   // ── Round management ──────────────────────────────────────────────────
 
@@ -230,9 +230,17 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
     // ── Background write — single batch commit ──
     try {
       await DB.addSelectionBatch(currentRound.id, toAdd.map(t => t.entry))
-      // Refresh to get real Firestore IDs (replaces optimistic entries)
+      // Refresh round data to get real Firestore IDs (replaces optimistic entries)
       const fresh = await DB.getRoundDetail(currentRound.id, allPlayers)
       setRoundData(fresh)
+      // Also patch local allPlayers so the picker team filter reflects the new squad membership
+      // immediately without a full page reload (teams_played_2026 was updated in Firestore by addSelectionBatch)
+      setAllPlayers(prev => prev.map(p => {
+        if (!toAdd.find(t => t.entry.player_id === p.id)) return p
+        const already = Array.isArray(p.teams_played_2026) ? p.teams_played_2026 : []
+        if (already.includes(teamId)) return p
+        return { ...p, teams_played_2026: [...already, teamId] }
+      }))
     } catch (err) {
       console.error('Failed to add players', err)
       // Rollback optimistic update
@@ -383,8 +391,16 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
     e.stopPropagation()
     e.dataTransfer.dropEffect = 'move'
     const rect = e.currentTarget.getBoundingClientRect()
-    const position = e.clientY < rect.top + rect.height / 2 ? 'above' : 'below'
-    setDragOverInfo({ teamId, playerId, position })
+    const relY = e.clientY - rect.top
+    // Dead-zone in the middle 40% — only commit above/below in the outer 30% each side
+    // This stops jitter when dragging through the midpoint
+    const threshold = rect.height * 0.3
+    if (relY > threshold && relY < rect.height - threshold) return
+    const position = relY <= threshold ? 'above' : 'below'
+    setDragOverInfo(prev => {
+      if (prev?.teamId === teamId && prev?.playerId === playerId && prev?.position === position) return prev
+      return { teamId, playerId, position }
+    })
   }
 
   const handleDragOverEmpty = (e, teamId) => {
@@ -659,19 +675,26 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
   }
 
   // Build a map of playerId → teamId from current round selections
-  // This reflects where players are actually placed this season
-  const playerTeamMap = useMemo(() => {
-    return roundData
-      ? Object.fromEntries(roundData.selections.map(s => [s.player_id, s.team_id]))
-      : {}
-  }, [roundData])
+  // This reflects where players are placed in THIS round
+  const playerTeamMap = roundData
+    ? Object.fromEntries(roundData.selections.map(s => [s.player_id, s.team_id]))
+    : {}
 
-  const availablePlayers = useMemo(() => {
+  const getAvailablePlayers = () => {
     const selected = getSelectedPlayerIds(pickerOpen?.teamId)
     return allPlayers
       .filter(p => !selected.has(p.id))
       .filter(p => showUnavailableInPicker || !roundUnavailability[p.id])
-      .filter(p => !pickerTeamFilter || playerTeamMap[p.id] === pickerTeamFilter || p.assigned_team_id_2026 === pickerTeamFilter)
+      .filter(p => {
+        if (!pickerTeamFilter) return true
+        // Check current round placement first
+        if (playerTeamMap[p.id] === pickerTeamFilter) return true
+        // Check all teams player has played for this season (carry-forward history)
+        if (Array.isArray(p.teams_played_2026) && p.teams_played_2026.includes(pickerTeamFilter)) return true
+        // Fall back to assigned team
+        if (p.assigned_team_id_2026 === pickerTeamFilter) return true
+        return false
+      })
       .filter(p => !searchTerm || p.name.toLowerCase().includes(searchTerm.toLowerCase()))
       .sort((a, b) => {
         const aU = !!roundUnavailability[a.id]
@@ -679,7 +702,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
         if (aU !== bU) return aU ? 1 : -1
         return a.name.localeCompare(b.name)
       })
-  }, [allPlayers, pickerOpen?.teamId, showUnavailableInPicker, roundUnavailability, pickerTeamFilter, playerTeamMap, searchTerm, roundData])
+  }
 
   const getTeamSelections = (teamId) => {
     if (!roundData) return {}
@@ -971,7 +994,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
     Metro: 'Metro 2 South',
   }
 
-  const duplicateIds = useMemo(() => getDuplicatePlayerIds(), [roundData])
+  const duplicateIds = getDuplicatePlayerIds()
 
   if (loading) return (
     <div className="flex items-center justify-center h-64 text-slate-500">Loading round data…</div>
@@ -1341,8 +1364,11 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
                         style={{
                           borderLeft: posStyle ? `3px solid ${posStyle.border}` : '3px solid transparent',
                           backgroundColor: posStyle ? posStyle.rowBg : undefined,
+                          // While dragging, make children transparent to pointer events so
+                          // dragover always fires on the row div (prevents jitter + wrong targets)
+                          ...(draggedPlayer ? { userSelect: 'none' } : {}),
                         }}
-                        className={`flex items-center gap-2 px-3 py-2 border-b border-slate-100 text-sm transition-colors ${
+                        className={`border-b border-slate-100 text-sm transition-colors ${
                           !posStyle ? 'hover:bg-slate-50' : ''
                         } ${
                           isDragOver
@@ -1352,6 +1378,9 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
                             : ''
                         }`}
                       >
+                        {/* Inner wrapper — pointer-events:none while dragging so the row div
+                            is always the dragover target, preventing jitter from child elements */}
+                        <div className="flex items-center gap-2 px-3 py-2 w-full" style={{ pointerEvents: draggedPlayer ? 'none' : 'auto' }}>
                         {/* Drag handle — touch drag only activates from here */}
                         <span
                           className="text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing flex-shrink-0 px-0.5 touch-none select-none"
@@ -1419,6 +1448,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
                             <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
                           </svg>
                         </button>
+                        </div>{/* end inner pointer-events wrapper */}
                       </div>
                     )
                   })}
@@ -1611,7 +1641,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
             </div>
 
             <div className="overflow-y-auto flex-1">
-              {availablePlayers.map(p => {
+              {getAvailablePlayers().map(p => {
                 const isSelected  = selectedPlayerIds.has(p.id)
                 const isUnavail   = !!roundUnavailability[p.id]
                 return (
@@ -1640,7 +1670,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
                   </div>
                 )
               })}
-              {availablePlayers.length === 0 && (
+              {getAvailablePlayers().length === 0 && (
                 <div className="px-4 py-6 text-center text-slate-400 text-sm">No players found</div>
               )}
             </div>
