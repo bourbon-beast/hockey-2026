@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import * as DB from '../db'
 import { carryForwardSelections } from '../db'
 
@@ -81,8 +81,8 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
     }
   }, [pickerOpen])
 
-  const seasonRounds = rounds.filter(r => r.round_type === 'season')
-  const practiceRounds = rounds.filter(r => r.round_type === 'practice')
+  const seasonRounds = useMemo(() => rounds.filter(r => r.round_type === 'season'), [rounds])
+  const practiceRounds = useMemo(() => rounds.filter(r => r.round_type === 'practice'), [rounds])
 
   // ── Round management ──────────────────────────────────────────────────
 
@@ -660,11 +660,13 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
 
   // Build a map of playerId → teamId from current round selections
   // This reflects where players are actually placed this season
-  const playerTeamMap = roundData
-    ? Object.fromEntries(roundData.selections.map(s => [s.player_id, s.team_id]))
-    : {}
+  const playerTeamMap = useMemo(() => {
+    return roundData
+      ? Object.fromEntries(roundData.selections.map(s => [s.player_id, s.team_id]))
+      : {}
+  }, [roundData])
 
-  const getAvailablePlayers = () => {
+  const availablePlayers = useMemo(() => {
     const selected = getSelectedPlayerIds(pickerOpen?.teamId)
     return allPlayers
       .filter(p => !selected.has(p.id))
@@ -677,7 +679,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
         if (aU !== bU) return aU ? 1 : -1
         return a.name.localeCompare(b.name)
       })
-  }
+  }, [allPlayers, pickerOpen?.teamId, showUnavailableInPicker, roundUnavailability, pickerTeamFilter, playerTeamMap, searchTerm, roundData])
 
   const getTeamSelections = (teamId) => {
     if (!roundData) return {}
@@ -969,7 +971,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
     Metro: 'Metro 2 South',
   }
 
-  const duplicateIds = getDuplicatePlayerIds()
+  const duplicateIds = useMemo(() => getDuplicatePlayerIds(), [roundData])
 
   if (loading) return (
     <div className="flex items-center justify-center h-64 text-slate-500">Loading round data…</div>
@@ -1609,7 +1611,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
             </div>
 
             <div className="overflow-y-auto flex-1">
-              {getAvailablePlayers().map(p => {
+              {availablePlayers.map(p => {
                 const isSelected  = selectedPlayerIds.has(p.id)
                 const isUnavail   = !!roundUnavailability[p.id]
                 return (
@@ -1638,7 +1640,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
                   </div>
                 )
               })}
-              {getAvailablePlayers().length === 0 && (
+              {availablePlayers.length === 0 && (
                 <div className="px-4 py-6 text-center text-slate-400 text-sm">No players found</div>
               )}
             </div>
