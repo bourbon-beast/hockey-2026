@@ -152,12 +152,12 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
             const label = currentRound ? `R${currentRound.round_number}${dateStr ? ` · ${dateStr}` : ''}` : 'No rounds'
             return (
                 <>
-                  <button onClick={() => prev && actions.setCurrentRound(prev)} disabled={!prev} className="w-7 h-7 flex items-center justify-center rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-25 text-sm font-bold flex-shrink-0">‹</button>
+                  <button onClick={() => prev && actions.setCurrentRound(prev)} aria-label="Previous round" disabled={!prev} className="w-7 h-7 flex items-center justify-center rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-25 text-sm font-bold flex-shrink-0">‹</button>
                   <span className="text-sm font-semibold text-slate-800 truncate min-w-0">{label}</span>
                   {!next ? (
                       <button onClick={() => setShowAdvanceModal(true)} className="px-2.5 h-7 flex items-center rounded border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-semibold flex-shrink-0">R{nextNum} →</button>
                   ) : (
-                      <button onClick={() => actions.setCurrentRound(next)} className="w-7 h-7 flex items-center justify-center rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 text-sm font-bold flex-shrink-0">›</button>
+                      <button onClick={() => actions.setCurrentRound(next)} aria-label="Next round" className="w-7 h-7 flex items-center justify-center rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 text-sm font-bold flex-shrink-0">›</button>
                   )}
                 </>
             )
@@ -174,7 +174,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
           <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
             {currentRound && <button onClick={openTeamSheetModal} className="h-7 px-2.5 flex items-center rounded text-xs font-medium bg-slate-700 text-white hover:bg-slate-800">Sheet</button>}
             <div className="relative">
-              <button onClick={() => setShowOverflowMenu(!showOverflowMenu)} className="w-7 h-7 flex items-center justify-center rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 text-sm">···</button>
+              <button onClick={() => setShowOverflowMenu(!showOverflowMenu)} aria-label="Round options menu" className="w-7 h-7 flex items-center justify-center rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 text-sm">···</button>
               {showOverflowMenu && (
                   <div className="absolute right-0 top-8 z-50 w-48 bg-white border border-slate-200 rounded-lg shadow-lg py-1" onMouseLeave={() => setShowOverflowMenu(false)}>
                     {currentRound && plannerMode === 'season' && <button onClick={() => { setShowOverflowMenu(false); setCarryForwardTeams(teams.map(t=>t.id)); setCarryForwardResult(null); setShowCarryForwardModal(true) }} className="w-full text-left px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50">Carry forward →</button>}
