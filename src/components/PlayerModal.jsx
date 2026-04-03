@@ -262,8 +262,17 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
             <div className="flex flex-col gap-3">
               <label className="flex items-center gap-3 cursor-pointer">
                 <div
+                  role="switch"
+                  aria-checked={form.is_international}
+                  tabIndex={0}
                   onClick={() => set('is_international', !form.is_international)}
-                  className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer ${form.is_international ? 'bg-amber-500' : 'bg-gray-200'}`}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      set('is_international', !form.is_international);
+                    }
+                  }}
+                  className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${form.is_international ? 'bg-amber-500' : 'bg-gray-200'}`}
                 >
                   <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${form.is_international ? 'translate-x-5' : 'translate-x-0.5'}`} />
                 </div>
@@ -273,8 +282,17 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
               {form.is_international && (
                 <label className="flex items-center gap-3 cursor-pointer ml-1">
                   <div
+                    role="switch"
+                    aria-checked={form.needs_visa}
+                    tabIndex={0}
                     onClick={() => set('needs_visa', !form.needs_visa)}
-                    className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer ${form.needs_visa ? 'bg-red-500' : 'bg-gray-200'}`}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        set('needs_visa', !form.needs_visa);
+                      }
+                    }}
+                    className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${form.needs_visa ? 'bg-red-500' : 'bg-gray-200'}`}
                   >
                     <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${form.needs_visa ? 'translate-x-5' : 'translate-x-0.5'}`} />
                   </div>

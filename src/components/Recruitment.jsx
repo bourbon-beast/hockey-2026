@@ -33,10 +33,21 @@ const INTERESTED_LABELS = {
 
 // ── Small toggle switch ──────────────────────────────────────────────────
 function Toggle({ value, onChange, colorOn = 'bg-amber-500' }) {
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onChange(!value);
+    }
+  };
+
   return (
     <div
+      role="switch"
+      aria-checked={value}
+      tabIndex={0}
       onClick={() => onChange(!value)}
-      className={`relative w-9 h-5 rounded-full transition-colors cursor-pointer flex-shrink-0 ${value ? colorOn : 'bg-gray-200'}`}
+      onKeyDown={handleKeyDown}
+      className={`relative w-9 h-5 rounded-full transition-colors cursor-pointer flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${value ? colorOn : 'bg-gray-200'}`}
     >
       <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${value ? 'translate-x-4' : 'translate-x-0.5'}`} />
     </div>
