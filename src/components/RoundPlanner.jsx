@@ -1666,7 +1666,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
                     {p.status_id && (
                       <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: getStatusColor(p.status_id) }} />
                     )}
-                    <span className="text-xs text-slate-400 flex-shrink-0">{playerTeamMap[p.id] || p.assigned_team_id_2026 || '—'}</span>
+                    <span className="text-xs text-slate-400 flex-shrink-0">{p.assigned_team_id_2026 || playerTeamMap[p.id] || p.teams_played_2026?.[0] || '—'}</span>
                   </div>
                 )
               })}

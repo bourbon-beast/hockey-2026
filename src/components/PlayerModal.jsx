@@ -98,7 +98,8 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
     getUnavailability({ player_id: player.id })
       .then(data => {
         const map = {}
-        data.forEach(u => { map[Number(u.round_id)] = u.days || 'both' })
+        // Use string keys to match r.id (which may be a Firestore string auto-ID)
+        data.forEach(u => { map[String(u.round_id)] = u.days || 'both' })
         setUnavailMap(map)
       })
   }, [player.id])
@@ -426,7 +427,7 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
               : (
                 <div className="space-y-1">
                   {rounds.filter(r => r.round_type === 'season').map(r => {
-                    const rid = Number(r.id)
+                    const rid = String(r.id)
                     const days = unavailMap[rid] // undefined | 'sat' | 'sun' | 'both'
                     const satUnavail = days === 'sat' || days === 'both'
                     const sunUnavail = days === 'sun' || days === 'both'

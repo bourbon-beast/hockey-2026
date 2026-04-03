@@ -170,7 +170,7 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
 
   const handlePlayerAdded = (player) => {
     setShowAddModal(false)
-    setStatusFilter('new')
+    setStatusFilter('all')
     onRefresh?.()
   }
 
