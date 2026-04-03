@@ -44,11 +44,12 @@ const Field = ({ label, hint, children }) => (
 
 const Select = ({ value, onChange, options, className = '', style }) => (
   <select
-    value={value}
-    onChange={e => onChange(e.target.value)}
+    value={value ?? ''}
+    onChange={e => onChange(e.target.value || null)}
     style={style}
     className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${className}`}
   >
+    <option value="">— Not set —</option>
     {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
   </select>
 )
@@ -92,7 +93,29 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
 
   useEffect(() => {
     getPlayer(player.id)
-      .then(data => setHistory(data?.history || []))
+      .then(data => {
+        if (!data) return
+        setHistory(data.history || [])
+        // Refresh form from Firestore so we have the latest values
+        // (the player prop may be from a stale list — e.g. status_id not yet loaded)
+        setForm(f => ({
+          ...f,
+          name:                  data.name,
+          is_active:             data.is_active === 0 ? false : true,
+          status_id:             data.status_id,
+          assigned_team_id_2026: data.assigned_team_id_2026 || '',
+          notes:                 data.notes || '',
+          is_new_registration:   data.is_new_registration === 1,
+          is_international:      data.is_international === 1,
+          needs_visa:            data.needs_visa === 1,
+          player_type:           data.player_type || '',
+          interested_in:         data.interested_in || '',
+          previous_club:         data.previous_club || '',
+          follow_up_ok:          data.follow_up_ok === null ? '' : (data.follow_up_ok ? 'yes' : 'no'),
+          unsure_reason:         data.unsure_reason || '',
+          playing_preference:    data.playing_preference || '',
+        }))
+      })
     getRounds()
       .then(setRounds)
     getUnavailability({ player_id: player.id })
