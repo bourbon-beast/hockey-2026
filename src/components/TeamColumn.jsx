@@ -126,7 +126,7 @@ export default function TeamColumn({
                             <div className="flex items-center gap-2 px-3 py-2 w-full" style={{ pointerEvents: draggedPlayer ? 'none' : 'auto' }}>
                                 <span className="text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing flex-shrink-0 px-0.5 touch-none select-none" onTouchStart={(e) => actions.handleTouchStart(e, sel, team.id)} onTouchMove={actions.handleTouchMove} onTouchEnd={actions.handleTouchEnd}>⠿</span>
                                 <span className="text-slate-400 text-xs w-4 text-center flex-shrink-0">{idx + 1}</span>
-                                <button onClick={() => actions.toggleConfirmed(team.id, sel.player_id)} title={avail.title} className={`w-5 h-5 rounded-full border-2 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${avail.bg} ${avail.border}`}>{avail.icon}</button>
+                                <button onClick={() => actions.toggleConfirmed(team.id, sel.player_id)} title={avail.title} aria-label={`Toggle availability for ${sel.name}. Current: ${avail.title}`} className={`w-5 h-5 rounded-full border-2 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${avail.bg} ${avail.border}`}>{avail.icon}</button>
                                 <div className="flex-1 flex items-center gap-1.5 min-w-0">
                                     <span className="truncate cursor-pointer hover:text-blue-600" onClick={() => onSelectPlayer && onSelectPlayer(allPlayers.find(p => p.id === sel.player_id) || { id: sel.player_id, name: sel.name })}>{sel.name}</span>
                                     {roundUnavailability[sel.player_id] ? <span className="w-2 h-2 rounded-full flex-shrink-0 bg-red-400" /> : <span className="w-2 h-2 rounded-full flex-shrink-0 bg-green-400" />}
@@ -136,7 +136,7 @@ export default function TeamColumn({
                                     <option value="">Pos</option>
                                     {POSITIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
                                 </select>
-                                <button onClick={() => actions.removePlayer(team.id, sel.player_id)} className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
+                                <button onClick={() => actions.removePlayer(team.id, sel.player_id)} aria-label={`Remove ${sel.name} from squad`} className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
                                     <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                                         <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
                                     </svg>
@@ -165,8 +165,8 @@ export default function TeamColumn({
                             <div className="flex-1 flex items-center gap-1.5 min-w-0">
                                 <span className="truncate text-slate-400 line-through text-xs cursor-pointer hover:text-blue-500 no-underline" onClick={() => onSelectPlayer && onSelectPlayer(allPlayers.find(p => p.id === sel.player_id) || { id: sel.player_id, name: sel.name })}>{sel.name}</span>
                             </div>
-                            <button onClick={() => actions.markSelectionUnavailable(team.id, sel.player_id, false)} className="text-slate-400 hover:text-blue-500 text-xs sm:opacity-0 sm:group-hover:opacity-100 flex-shrink-0">↑ squad</button>
-                            <button onClick={() => actions.removePlayer(team.id, sel.player_id)} className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
+                            <button onClick={() => actions.markSelectionUnavailable(team.id, sel.player_id, false)} aria-label={`Move ${sel.name} back to squad`} className="text-slate-400 hover:text-blue-500 text-xs sm:opacity-0 sm:group-hover:opacity-100 flex-shrink-0">↑ squad</button>
+                            <button onClick={() => actions.removePlayer(team.id, sel.player_id)} aria-label={`Remove ${sel.name} from unavailable list`} className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                                     <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
                                 </svg>
