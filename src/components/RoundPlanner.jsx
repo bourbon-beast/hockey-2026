@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useRoundManager } from './useRoundManager'
 import { buildTeamCanvas } from './roundUtils'
 import TeamColumn from './TeamColumn'
@@ -49,9 +49,11 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
   // Getters mapped
   const getStatusColor = (statusId) => statuses.find(s => s.id === statusId)?.color || '#6b7280'
   const duplicateIds = getters.getDuplicatePlayerIds()
-  const playerTeamMap = roundData ? Object.fromEntries(roundData.selections.map(s => [s.player_id, s.team_id])) : {}
+  // Optimization: Memoize playerTeamMap to prevent recalculating object entries from roundData.selections on every render.
+  const playerTeamMap = useMemo(() => roundData ? Object.fromEntries(roundData.selections.map(s => [s.player_id, s.team_id])) : {}, [roundData])
 
-  const getAvailablePlayers = () => {
+  // Optimization: Memoize availablePlayers to prevent expensive filtering and sorting of all players on every render, especially when searching.
+  const availablePlayers = useMemo(() => {
     const selected = new Set(roundData?.selections.filter(s => s.team_id === pickerOpen?.teamId).map(s => s.player_id))
     return allPlayers
         .filter(p => !selected.has(p.id))
@@ -70,7 +72,12 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
           if (aU !== bU) return aU ? 1 : -1
           return a.name.localeCompare(b.name)
         })
-  }
+  }, [allPlayers, roundData, pickerOpen?.teamId, showUnavailableInPicker, roundUnavailability, pickerTeamFilter, playerTeamMap, searchTerm])
+
+  // Optimization: Memoize unavailPlayers to prevent filtering and sorting all players on every render.
+  const unavailPlayers = useMemo(() => {
+    return allPlayers.filter(p => roundUnavailability[p.id]).sort((a, b) => a.name.localeCompare(b.name))
+  }, [allPlayers, roundUnavailability])
 
   // Action Wrappers for Modals
   const handleCreateRound = async (copyFromPrevious = false, typeOverride = null) => {
@@ -206,9 +213,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
         {!currentRound && <div className="text-slate-500 text-sm">No rounds yet. Create one to get started.</div>}
 
         {/* ── Unavailability Banner ── */}
-        {currentRound && Object.keys(roundUnavailability).length > 0 && (() => {
-          const unavailPlayers = allPlayers.filter(p => roundUnavailability[p.id]).sort((a, b) => a.name.localeCompare(b.name))
-          return (
+        {currentRound && Object.keys(roundUnavailability).length > 0 && (
               <div className="mb-3 rounded border border-red-200 bg-red-50 overflow-hidden">
                 <div className="flex items-center gap-2 px-3 py-2 flex-wrap">
                   <span className="text-xs font-semibold text-red-700 uppercase tracking-wide">Unavailable</span>
@@ -221,7 +226,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
                 </div>
               </div>
           )
-        })()}
+        }
 
         {/* ── Grid Columns (This is where TeamColumn is used!) ── */}
         {currentRound && (
@@ -262,7 +267,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
                   </div>
                 </div>
                 <div className="overflow-y-auto flex-1">
-                  {getAvailablePlayers().map(p => {
+                  {availablePlayers.map(p => {
                     const isSelected = selectedPlayerIds.has(p.id)
                     const isUnavail = !!roundUnavailability[p.id]
                     return (
