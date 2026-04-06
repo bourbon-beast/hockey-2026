@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import DOMPurify from 'dompurify'
 import { getRounds, getRoundMatches, getHvSync } from '../db'
 
 // ─── Result badge ─────────────────────────────────────────────────────────────
@@ -208,7 +209,7 @@ function DigestTab() {
       {/* HTML preview — matches what gets pasted into Gmail */}
       <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
         {data.html
-          ? <div className="p-4" dangerouslySetInnerHTML={{ __html: data.html }} />
+          ? <div className="p-4" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(data.html) }} />
           : <pre className="p-4 text-sm text-slate-700 whitespace-pre-wrap font-sans leading-relaxed">
               {data.text}
             </pre>
