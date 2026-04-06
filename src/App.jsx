@@ -43,18 +43,22 @@ function App() {
       <nav className="hidden sm:block bg-white border-b border-gray-200 px-6 py-3">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-semibold text-gray-800">MHC Squad Tracker</h1>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
             {NAV.map(n => (
               <button
                 key={n.id}
                 onClick={() => setView(n.id)}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                className={`relative flex flex-col items-center justify-center gap-1 px-4 py-2 rounded-md text-xs font-medium transition-colors ${
                   view === n.id
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'text-gray-600 hover:bg-gray-100'
+                    ? 'text-blue-600'
+                    : 'text-gray-500 hover:text-gray-800'
                 }`}
               >
-                {n.label}
+                <n.Icon size={18} strokeWidth={1.5} />
+                <span>{n.label}</span>
+                {view === n.id && (
+                  <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 bg-blue-600 rounded-full" />
+                )}
               </button>
             ))}
           </div>

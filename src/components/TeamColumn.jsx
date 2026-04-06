@@ -86,9 +86,33 @@ export default function TeamColumn({
                 </div>
 
                 {/* ── Match Inline Details ── */}
-                <div className="px-3 py-2 space-y-1" style={{ background: '#1e293b' }}>
+                <div className="px-3 pt-2.5 pb-2 space-y-1.5" style={{ background: '#1e293b' }}>
 
-                    {/* vs — most important, first */}
+                    {/* Venue — top, scan for double-ups */}
+                    <input type="text" defaultValue={match.venue || ''} placeholder="Venue"
+                        onBlur={e => actions.updateMatchDetails(team.id, { venue: e.target.value })}
+                        className="w-full bg-transparent text-slate-200 placeholder-slate-600 text-xs font-medium px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400" />
+
+                    {/* Date + Time on one row — time dominates */}
+                    <div className="flex items-baseline gap-3">
+                        <input type="date" defaultValue={match.match_date || ''}
+                            onBlur={e => actions.updateMatchDetails(team.id, { match_date: e.target.value })}
+                            className="flex-none bg-transparent text-slate-500 text-xs py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400"
+                            style={{ colorScheme: 'dark' }} />
+                        <input type="text" defaultValue={match.time || ''} placeholder="Time"
+                            onBlur={e => actions.updateMatchDetails(team.id, { time: e.target.value })}
+                            className="w-20 flex-none bg-transparent text-white placeholder-slate-600 text-base font-semibold tabular-nums px-0 py-0.5 border-0 border-b border-slate-600 focus:outline-none focus:border-yellow-400" />
+                    </div>
+
+                    {/* Arrive */}
+                    <div className="flex items-baseline gap-2">
+                        <span className="text-slate-600 text-xs flex-none">arr</span>
+                        <input type="text" defaultValue={match.arrive_at || ''} placeholder="–"
+                            onBlur={e => actions.updateMatchDetails(team.id, { arrive_at: e.target.value })}
+                            className="w-14 flex-none bg-transparent text-slate-400 placeholder-slate-700 text-xs px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400" />
+                    </div>
+
+                    {/* Opponent */}
                     <input
                         type="text"
                         defaultValue={match.opponent || ''}
@@ -106,32 +130,11 @@ export default function TeamColumn({
                                 updates.socks_colour = socks ? 'Blue' : 'Yellow'
                             actions.updateMatchDetails(team.id, updates)
                         }}
-                        className="w-full bg-transparent text-white placeholder-slate-500 text-sm font-semibold px-0 py-0.5 border-0 border-b border-slate-600 focus:outline-none focus:border-yellow-400"
+                        className="w-full bg-transparent text-slate-100 placeholder-slate-500 text-sm font-medium px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400"
                     />
 
-                    {/* Time + Arrive on one row */}
-                    <div className="flex gap-3">
-                        <input type="text" defaultValue={match.time || ''} placeholder="Time"
-                            onBlur={e => actions.updateMatchDetails(team.id, { time: e.target.value })}
-                            className="flex-1 bg-transparent text-slate-300 placeholder-slate-600 text-xs px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400" />
-                        <input type="text" defaultValue={match.arrive_at || ''} placeholder="Arrive"
-                            onBlur={e => actions.updateMatchDetails(team.id, { arrive_at: e.target.value })}
-                            className="flex-1 bg-transparent text-slate-300 placeholder-slate-600 text-xs px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400" />
-                    </div>
-
-                    {/* Venue */}
-                    <input type="text" defaultValue={match.venue || ''} placeholder="Venue"
-                        onBlur={e => actions.updateMatchDetails(team.id, { venue: e.target.value })}
-                        className="w-full bg-transparent text-slate-300 placeholder-slate-600 text-xs px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400" />
-
-                    {/* Date */}
-                    <input type="date" defaultValue={match.match_date || ''}
-                        onBlur={e => actions.updateMatchDetails(team.id, { match_date: e.target.value })}
-                        className="w-full bg-transparent text-slate-500 text-xs py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400"
-                        style={{ colorScheme: 'dark' }} />
-
-                    {/* Kit row — compact outlined selects + clash icon inline */}
-                    <div className="flex items-center gap-2 pt-0.5">
+                    {/* Kit row — footnote level, separated by hairline */}
+                    <div className="flex items-center gap-2 pt-1 border-t border-slate-700/50">
                         {Object.entries(KIT_COLOURS).map(([key, { options }]) => {
                             const defaults = { top_colour: 'Blue', socks_colour: 'Yellow' }
                             const raw = match[key] || defaults[key]
@@ -143,12 +146,12 @@ export default function TeamColumn({
                                     <select
                                         value={val}
                                         onChange={e => actions.updateMatchDetails(team.id, { [key]: e.target.value })}
-                                        className={`w-full text-xs font-medium rounded px-2 py-1 text-center
+                                        className={`w-full text-xs rounded px-2 py-1 text-center
                                                    appearance-none cursor-pointer focus:outline-none
                                                    bg-transparent border transition-colors
                                                    ${isClash
                                                      ? 'border-amber-400 text-amber-300'
-                                                     : 'border-slate-600 text-slate-300 hover:border-slate-400'}`}
+                                                     : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
                                     >
                                         {options.map(o => (
                                             <option key={o} value={o}
