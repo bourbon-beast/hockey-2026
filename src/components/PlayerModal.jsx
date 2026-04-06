@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getPlayer, updatePlayer, getRounds, getUnavailability, addUnavailability, removeUnavailability, updateUnavailabilityDays } from '../db'
+import { getPlayer, updatePlayer, getRounds, getUnavailability, addUnavailability, removeUnavailability, updateUnavailabilityDays, removeTeamPlayed } from '../db'
 
 // ── Constants mirroring the survey ─────────────────────────────────────────
 const PLAYER_TYPES = [
@@ -87,7 +87,8 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
   const [history, setHistory] = useState([])
   const [saving, setSaving] = useState(false)
   const [rounds, setRounds] = useState([])
-  const [unavailMap, setUnavailMap] = useState({}) // roundId → 'sat'|'sun'|'both'
+  const [unavailMap, setUnavailMap] = useState({})
+  const [teamsPlayed, setTeamsPlayed] = useState(player.teams_played_2026 || [])
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -96,6 +97,7 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
       .then(data => {
         if (!data) return
         setHistory(data.history || [])
+        setTeamsPlayed(data.teams_played_2026 || [])
         // Refresh form from Firestore so we have the latest values
         // (the player prop may be from a stale list — e.g. status_id not yet loaded)
         setForm(f => ({
@@ -126,6 +128,22 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
         setUnavailMap(map)
       })
   }, [player.id])
+
+  // Toggle both days at once — one click for whole round unavailable
+  const toggleBoth = async (roundId) => {
+    const current = unavailMap[roundId]
+    if (current === 'both') {
+      setUnavailMap(prev => { const m = { ...prev }; delete m[roundId]; return m })
+      await removeUnavailability(player.id, roundId)
+    } else {
+      setUnavailMap(prev => ({ ...prev, [roundId]: 'both' }))
+      if (!current) {
+        await addUnavailability({ player_id: player.id, round_id: roundId, days: 'both' })
+      } else {
+        await updateUnavailabilityDays(player.id, roundId, 'both')
+      }
+    }
+  }
 
   // Toggle a day for a round. day = 'sat' | 'sun'
   // Logic: if no record → add with that day. If record exists, toggle that day in/out.
@@ -288,6 +306,27 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
                 ))}
               </select>
             </Field>
+
+            {teamsPlayed.length > 0 && (
+              <Field label="Teams played 2026" hint="tap × to remove">
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {teamsPlayed.map(teamId => (
+                    <span key={teamId} className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full bg-blue-100 text-blue-700 border border-blue-200">
+                      {teamId}
+                      <button
+                        onClick={async () => {
+                          setTeamsPlayed(prev => prev.filter(t => t !== teamId))
+                          await removeTeamPlayed(player.id, teamId)
+                        }}
+                        className="ml-0.5 text-blue-400 hover:text-red-500 transition-colors leading-none"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </Field>
+            )}
           </Section>
 
           <Divider />
@@ -499,16 +538,28 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
 
                         {/* Sun button — only show if round has a Sunday */}
                         {r.sun_date ? (
-                          <button
-                            onClick={() => toggleDay(rid, 'sun')}
-                            className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border transition-colors flex-shrink-0 ${
-                              sunUnavail
-                                ? 'bg-red-500 border-red-500 text-white'
-                                : 'bg-white border-gray-200 text-gray-500 hover:border-red-300 hover:text-red-500'
-                            }`}
-                          >
-                            Sun {sunStr}
-                          </button>
+                          <>
+                            <button
+                              onClick={() => toggleDay(rid, 'sun')}
+                              className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border transition-colors flex-shrink-0 ${
+                                sunUnavail
+                                  ? 'bg-red-500 border-red-500 text-white'
+                                  : 'bg-white border-gray-200 text-gray-500 hover:border-red-300 hover:text-red-500'
+                              }`}
+                            >
+                              Sun {sunStr}
+                            </button>
+                            <button
+                              onClick={() => toggleBoth(rid)}
+                              className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border transition-colors flex-shrink-0 ${
+                                days === 'both'
+                                  ? 'bg-red-600 border-red-600 text-white'
+                                  : 'bg-white border-gray-200 text-gray-500 hover:border-red-300 hover:text-red-500'
+                              }`}
+                            >
+                              Both
+                            </button>
+                          </>
                         ) : (
                           <span className="text-xs text-gray-300 flex-shrink-0">Sun —</span>
                         )}

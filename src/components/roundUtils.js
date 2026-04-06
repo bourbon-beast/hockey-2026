@@ -19,10 +19,9 @@ export const TEAM_FULL_NAMES = {
 }
 
 export const AVAILABILITY = {
-    0: { label: 'Unconfirmed', bg: 'bg-gray-200',  border: 'border-gray-300',   icon: null, title: 'Click — mark as waiting' },
-    1: { label: 'Waiting',     bg: 'bg-yellow-400', border: 'border-yellow-400', icon: '?',  title: 'Click — mark as confirmed' },
-    2: { label: 'Confirmed',   bg: 'bg-green-500',  border: 'border-green-500',  icon: '✓',  title: 'Click — mark as unavailable' },
-    3: { label: 'Unavailable', bg: 'bg-red-500',    border: 'border-red-500',    icon: '✕',  title: 'Click — reset' },
+    0: { label: 'Not contacted', bg: 'bg-gray-200',  border: 'border-gray-300',   icon: null, title: 'Click — mark as waiting' },
+    1: { label: 'Waiting',       bg: 'bg-yellow-400', border: 'border-yellow-400', icon: '?',  title: 'Click — mark as confirmed' },
+    2: { label: 'Confirmed',     bg: 'bg-green-500',  border: 'border-green-500',  icon: '✓',  title: 'Click — reset to not contacted' },
 }
 
 export const POSITIONS = [

@@ -1,27 +1,30 @@
 import { useState, useEffect } from 'react'
+import { ClipboardList, Calendar, UserX, Users, LayoutGrid, MoreHorizontal } from 'lucide-react'
 import TeamView from './components/TeamView'
 import AllPlayers from './components/AllPlayers'
 import RoundPlanner from './components/RoundPlanner'
 import PlayerModal from './components/PlayerModal'
 import UnavailabilityManager from './components/UnavailabilityManager'
+import FixtureView from './components/FixtureView'
 import { getTeams, getStatuses } from './db'
 
 const NAV = [
-  { id: 'round',   label: 'Round Planner',  icon: '🏑' },
-  { id: 'players', label: 'Players',        icon: '👥' },
-  { id: 'team',    label: 'Team View',      icon: '🗂️' },
-  { id: 'unavail', label: 'Unavailability', icon: '🚫' },
+  { id: 'round',   label: 'Planner',       Icon: ClipboardList },
+  { id: 'fixture', label: 'Fixture',       Icon: Calendar      },
+  { id: 'unavail', label: 'Availability',  Icon: UserX         },
+  { id: 'team',    label: 'Teams',         Icon: LayoutGrid    },
+  { id: 'players', label: 'Players',       Icon: Users         },
 ]
 
-const MOBILE_TABS = ['round', 'players', 'team']
+const MOBILE_TABS = ['round', 'fixture', 'unavail', 'team']
 
 function App() {
-  const [view, setView] = useState('round')
-  const [teams, setTeams] = useState([])
-  const [statuses, setStatuses] = useState([])
+  const [view, setView]               = useState('round')
+  const [teams, setTeams]             = useState([])
+  const [statuses, setStatuses]       = useState([])
   const [selectedTeam, setSelectedTeam] = useState('PL')
   const [selectedPlayer, setSelectedPlayer] = useState(null)
-  const [refreshKey, setRefreshKey] = useState(0)
+  const [refreshKey, setRefreshKey]   = useState(0)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
 
   useEffect(() => {
@@ -40,7 +43,7 @@ function App() {
       <nav className="hidden sm:block bg-white border-b border-gray-200 px-6 py-3">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-semibold text-gray-800">MHC Squad Tracker</h1>
-          <div className="flex gap-1">
+          <div className="flex items-center gap-1">
             {NAV.map(n => (
               <button
                 key={n.id}
@@ -72,6 +75,7 @@ function App() {
         {view === 'team'    && <TeamView teams={teams} statuses={statuses} selectedTeam={selectedTeam} onSelectTeam={setSelectedTeam} onSelectPlayer={openPlayer} refreshKey={refreshKey} onRefresh={refresh} />}
         {view === 'round'   && <RoundPlanner statuses={statuses} onSelectPlayer={openPlayer} />}
         {view === 'unavail' && <UnavailabilityManager onSelectPlayer={openPlayer} />}
+        {view === 'fixture' && <FixtureView teams={teams} />}
       </main>
 
       {/* ── Mobile bottom tab bar ─────────────────────────────────────── */}
@@ -87,7 +91,7 @@ function App() {
                 view === id && !showMoreMenu ? 'text-blue-600' : 'text-gray-400'
               }`}
             >
-              <span className="text-xl leading-none">{n.icon}</span>
+              <n.Icon size={20} strokeWidth={1.75} />
               <span>{n.label}</span>
             </button>
           )
@@ -100,7 +104,7 @@ function App() {
             showMoreMenu || !MOBILE_TABS.includes(view) ? 'text-blue-600' : 'text-gray-400'
           }`}
         >
-          <span className="text-xl leading-none">•••</span>
+          <MoreHorizontal size={20} strokeWidth={1.75} />
           <span>More</span>
         </button>
       </nav>
@@ -120,7 +124,7 @@ function App() {
                   view === n.id ? 'text-blue-600 bg-blue-50' : 'text-gray-700'
                 }`}
               >
-                <span className="text-lg">{n.icon}</span>
+                <n.Icon size={18} strokeWidth={1.75} />
                 {n.label}
               </button>
             ))}

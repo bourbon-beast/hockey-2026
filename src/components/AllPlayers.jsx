@@ -126,9 +126,9 @@ function AddPlayerModal({ teams, statuses, onSave, onClose }) {
 // ── Main AllPlayers Component ───────────────────────────────────────────────
 export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey, onRefresh }) {
   const [players, setPlayers]           = useState([])
-  const [search, setSearch]             = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [sortBy, setSortBy]             = useState('name')
+  const [search, setSearch]                   = useState('')
+  const [statusFilters, setStatusFilters]      = useState(new Set())
+  const [sortBy, setSortBy]                    = useState('name')
   const [sortDir, setSortDir]           = useState('asc')
   const [showAddModal, setShowAddModal] = useState(false)
   const [showInactive, setShowInactive] = useState(false)
@@ -142,7 +142,7 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
   const filtered = players
     .filter(p => {
       if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false
-      if (statusFilter !== 'all' && p.status_id !== statusFilter) return false
+      if (statusFilters.size > 0 && !statusFilters.has(p.status_id)) return false
       return true
     })
     .sort((a, b) => {
@@ -170,7 +170,7 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
 
   const handlePlayerAdded = (player) => {
     setShowAddModal(false)
-    setStatusFilter('all')
+    setStatusFilters(new Set())
     onRefresh?.()
   }
 
@@ -190,34 +190,55 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3 mb-4 items-center">
+      <div className="flex flex-wrap gap-2 mb-4 items-center">
         <input
           type="text"
           placeholder="Search by name..."
           value={search}
           onChange={e => setSearch(e.target.value)}
-          className="px-3 py-2 border border-gray-300 rounded-lg w-56 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          className="px-3 py-2 border border-gray-300 rounded-lg w-48 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
         />
-        <select
-          value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
-          className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-        >
-          <option value="all">All statuses</option>
-          {statuses.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-        </select>
+
+        {/* Status chips — multi-select, empty = all */}
+        <div className="flex flex-wrap gap-1.5">
+          {statuses.map(s => {
+            const active = statusFilters.has(s.id)
+            return (
+              <button
+                key={s.id}
+                onClick={() => setStatusFilters(prev => {
+                  const next = new Set(prev)
+                  active ? next.delete(s.id) : next.add(s.id)
+                  return next
+                })}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                  active ? 'text-white border-transparent' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
+                }`}
+                style={active ? { backgroundColor: s.color, borderColor: s.color } : {}}
+              >
+                <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: active ? 'white' : s.color }} />
+                {s.label}
+              </button>
+            )
+          })}
+          {statusFilters.size > 0 && (
+            <button onClick={() => setStatusFilters(new Set())} className="px-2 py-1 rounded-full text-xs text-gray-400 hover:text-gray-600 border border-gray-200">
+              Clear
+            </button>
+          )}
+        </div>
 
         {/* Inactive toggle */}
         <button
           onClick={() => setShowInactive(v => !v)}
-          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-colors ${
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs transition-colors ${
             showInactive
               ? 'bg-gray-700 text-white border-gray-700'
               : 'bg-white text-gray-500 border-gray-300 hover:border-gray-400'
           }`}
         >
           <span className={`w-2 h-2 rounded-full ${showInactive ? 'bg-gray-300' : 'bg-gray-400'}`} />
-          {showInactive ? `Showing inactive (${inactiveCount})` : 'Show inactive'}
+          {showInactive ? `Inactive (${inactiveCount})` : 'Show inactive'}
         </button>
 
         <span className="text-sm text-gray-500 ml-auto">{filtered.length} players</span>

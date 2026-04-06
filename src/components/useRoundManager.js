@@ -135,11 +135,19 @@ export function useRoundManager() {
             await DB.addSelectionBatch(currentRound.id, toAdd.map(t => t.entry))
             const fresh = await DB.getRoundDetail(currentRound.id, allPlayers)
             setRoundData(fresh)
+            // Optimistic: update games_played_2026 count so picker filters reflect immediately
             setAllPlayers(prev => prev.map(p => {
-                if (!toAdd.find(t => t.entry.player_id === p.id)) return p
+                const addEntry = toAdd.find(t => t.entry.player_id === p.id)
+                if (!addEntry) return p
+                const tId = addEntry.entry.team_id
                 const already = Array.isArray(p.teams_played_2026) ? p.teams_played_2026 : []
-                if (already.includes(teamId)) return p
-                return { ...p, teams_played_2026: [...already, teamId] }
+                const gp = { ...(p.games_played_2026 || {}) }
+                gp[tId] = (gp[tId] || 0) + 1
+                return {
+                    ...p,
+                    teams_played_2026: already.includes(tId) ? already : [...already, tId],
+                    games_played_2026: gp,
+                }
             }))
         } catch (err) {
             console.error('Failed to add players', err)
@@ -150,6 +158,7 @@ export function useRoundManager() {
 
     const removePlayer = (teamId, playerId) => {
         if (!currentRound) return
+        // Optimistic: remove from selections and decrement game count
         setRoundData(prev => {
             if (!prev) return prev
             const sels = prev.selections.filter(s => !(s.team_id === teamId && s.player_id === playerId))
@@ -157,6 +166,12 @@ export function useRoundManager() {
             teamSels.forEach((s, i) => { s.slot_number = i + 1 })
             return { ...prev, selections: sels }
         })
+        setAllPlayers(prev => prev.map(p => {
+            if (p.id !== playerId) return p
+            const gp = { ...(p.games_played_2026 || {}) }
+            gp[teamId] = Math.max(0, (gp[teamId] || 0) - 1)
+            return { ...p, games_played_2026: gp }
+        }))
         DB.removeSelection(currentRound.id, teamId, playerId).catch(err => {
             console.error('Remove failed:', err)
             DB.getRoundDetail(currentRound.id, allPlayers).then(setRoundData)
@@ -168,7 +183,9 @@ export function useRoundManager() {
         setRoundData(prev => ({
             ...prev,
             selections: prev.selections.map(s =>
-                s.team_id === teamId && s.player_id === playerId ? { ...s, is_unavailable: isUnavailable ? 1 : 0 } : s
+                s.team_id === teamId && s.player_id === playerId
+                    ? { ...s, is_unavailable: isUnavailable ? 1 : 0, ...(isUnavailable ? { confirmed: 0 } : {}) }
+                    : s
             )
         }))
         await DB.updateSelectionUnavailable(currentRound.id, teamId, playerId, isUnavailable).catch(() => {
@@ -296,6 +313,40 @@ export function useRoundManager() {
         })
     }
 
+    const moveSelectionByIndex = (teamId, fromIdx, toIdx) => {
+        // Get ordered selections for this team
+        const teamSels = roundData?.selections
+            .filter(s => s.team_id === teamId && !s.is_unavailable)
+            .sort((a, b) => a.slot_number - b.slot_number)
+        if (!teamSels || fromIdx < 0 || toIdx < 0 || toIdx >= teamSels.length) return
+
+        const moving       = teamSels[fromIdx]
+        const targetPlayer = teamSels[toIdx]
+        const insertAfter  = toIdx > fromIdx
+
+        // Optimistic UI update
+        setRoundData(prev => {
+            if (!prev) return prev
+            const sels    = [...prev.selections]
+            const movingDoc  = sels.find(s => s.player_id === moving.player_id && s.team_id === teamId)
+            const targetDoc  = sels.find(s => s.player_id === targetPlayer.player_id && s.team_id === teamId)
+            if (!movingDoc || !targetDoc) return prev
+            const tmpSlot          = movingDoc.slot_number
+            movingDoc.slot_number  = targetDoc.slot_number
+            targetDoc.slot_number  = tmpSlot
+            return { ...prev, selections: sels }
+        })
+
+        // Persist
+        DB.moveSelection(currentRound.id, {
+            playerId:          moving.player_id,
+            from_team_id:      teamId,
+            target_team_id:    teamId,
+            target_player_id:  targetPlayer.player_id,
+            insert_after:      insertAfter,
+        }).catch(() => DB.getRoundDetail(currentRound.id, allPlayers).then(setRoundData))
+    }
+
     const handleDragEnd = () => {
         setDraggedPlayer(null)
         setDragOverInfo(null)
@@ -309,18 +360,39 @@ export function useRoundManager() {
         return el
     }
 
+    const touchHoldTimer = useRef(null)
+
     const handleTouchStart = (e, selection, fromTeamId, fromBucket = false) => {
         if (e.target.closest('button, select')) return
+
+        // Clear any existing timer
+        if (touchHoldTimer.current) clearTimeout(touchHoldTimer.current)
+
         const touch = e.touches[0]
-        const ghostEl = createGhost(selection.name)
-        ghostEl.style.left = touch.clientX + 'px'
-        ghostEl.style.top  = touch.clientY + 'px'
-        touchDragRef.current = { playerId: selection.player_id, fromTeamId, fromBucket, ghostEl }
-        touchScrollLocked.current = false
-        setDraggedPlayer({ playerId: selection.player_id, fromTeamId, fromBucket })
+        const startX = touch.clientX
+        const startY = touch.clientY
+
+        // Only activate drag after 220ms hold — prevents iOS text selection conflict
+        touchHoldTimer.current = setTimeout(() => {
+            touchHoldTimer.current = null
+            const ghostEl = createGhost(selection.name)
+            ghostEl.style.left = startX + 'px'
+            ghostEl.style.top  = startY + 'px'
+            touchDragRef.current = { playerId: selection.player_id, fromTeamId, fromBucket, ghostEl }
+            touchScrollLocked.current = false
+            setDraggedPlayer({ playerId: selection.player_id, fromTeamId, fromBucket })
+            // Haptic feedback on iOS if available
+            if (navigator.vibrate) navigator.vibrate(30)
+        }, 220)
     }
 
     const handleTouchMove = (e) => {
+        // If the hold timer hasn't fired yet, cancel it — user is scrolling not dragging
+        if (touchHoldTimer.current) {
+            clearTimeout(touchHoldTimer.current)
+            touchHoldTimer.current = null
+            return
+        }
         if (!touchDragRef.current) return
         const touch = e.touches[0]
         if (!touchScrollLocked.current) touchScrollLocked.current = true
@@ -351,6 +423,11 @@ export function useRoundManager() {
     }
 
     const handleTouchEnd = (e) => {
+        // Cancel pending hold timer if finger lifted before drag activated
+        if (touchHoldTimer.current) {
+            clearTimeout(touchHoldTimer.current)
+            touchHoldTimer.current = null
+        }
         if (!touchDragRef.current) return
         const { ghostEl, playerId, fromTeamId, fromBucket } = touchDragRef.current
         if (ghostEl) ghostEl.remove()
@@ -410,15 +487,17 @@ export function useRoundManager() {
 
     // ── Getters ──
     const getTeamCounts = (teamId) => {
-        if (!roundData) return { total: 0, confirmed: 0, waiting: 0, unavailable: 0, unavailableBucket: 0 }
+        if (!roundData) return { total: 0, active: 0, confirmed: 0, waiting: 0, unavailableBucket: 0 }
         const sels = roundData.selections.filter(s => s.team_id === teamId)
         const activeSels = sels.filter(s => !s.is_unavailable)
+        const bucketCount = sels.filter(s => s.is_unavailable).length
         return {
-            total: activeSels.length,
+            total: activeSels.length + bucketCount,
+            active: activeSels.length,
             confirmed: activeSels.filter(s => (s.confirmed ?? 0) === 2).length,
             waiting: activeSels.filter(s => (s.confirmed ?? 0) === 1).length,
-            unavailable: activeSels.filter(s => (s.confirmed ?? 0) === 3).length,
-            unavailableBucket: sels.filter(s => s.is_unavailable).length,
+            uncontacted: activeSels.filter(s => (s.confirmed ?? 0) === 0).length,
+            unavailableBucket: bucketCount,
         }
     }
 
@@ -449,7 +528,8 @@ export function useRoundManager() {
             setCurrentRound, createRound, deleteRound, updateRound, carryForward, updateMatchDetails,
             addPlayers, removePlayer, markSelectionUnavailable, toggleConfirmed, updatePosition,
             handleDragStart, handleDragOverRow, handleDragOverEmpty, handleDragOverColumn,
-            handleDropToBucket, handleDrop, handleDragEnd, handleTouchStart, handleTouchMove, handleTouchEnd
+            handleDropToBucket, handleDrop, handleDragEnd, handleTouchStart, handleTouchMove, handleTouchEnd,
+            moveSelectionByIndex
         },
         getters: {
             getTeamCounts, getPositionCounts, getDuplicatePlayerIds, getTeamActiveSelections,

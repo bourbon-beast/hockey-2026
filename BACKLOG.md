@@ -6,6 +6,8 @@ Last updated: 28 Mar 2026
 
 ## 🔴 In Progress / Immediate
 
+- [ ] **Auth — magic link** — implementation started but parked. Issues: (1) Firebase magic link emails going to spam from `noreply@hockey-2026-uat.firebaseapp.com`, (2) redirect flow janky — user briefly sees login page on return before auth state resolves. Options to revisit: configure custom SMTP sender in Firebase, fix `completeMagicLinkSignIn` timing in App.jsx, or switch to a different auth provider. Files: `src/auth.js`, `src/components/LoginPage.jsx`. **Currently disabled** — auth gate removed from App.jsx until resolved.
+
 - [ ] **Player unavailability — seed script** — fix Andy Ridley / Trent Dean name mismatch, run seed after deploy
 - [ ] **Deploy pending changes** — `./deploy.sh --all` (unavailability backend + frontend, round ordering, player modal)
 

@@ -1,5 +1,19 @@
 {
   "projects": {
-    "default": "hockey-2026-f521f"
+    "default": "hockey-2026-f521f",
+    "prod": "hockey-2026-f521f",
+    "uat": "hockey-2026-uat"
+  },
+  "targets": {
+    "hockey-2026-f521f": {
+      "hosting": {
+        "prod": ["hockey-2026-f521f"]
+      }
+    },
+    "hockey-2026-uat": {
+      "hosting": {
+        "uat": ["hockey-2026-uat"]
+      }
+    }
   }
 }

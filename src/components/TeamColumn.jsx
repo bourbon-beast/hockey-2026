@@ -1,27 +1,50 @@
+import { useState, useEffect } from 'react'
+import { ArrowUpDown, AlertTriangle } from 'lucide-react'
 import { AVAILABILITY, POSITIONS, POSITION_STYLES } from './roundUtils'
+import { checkClash } from '../kitClashes'
 
 export default function TeamColumn({
-                                       team, state, actions, getters, duplicateIds, onSelectPlayer, setPickerOpen
-                                   }) {
+    team, state, actions, getters, duplicateIds, onSelectPlayer, setPickerOpen
+}) {
     const { allPlayers, roundUnavailability, draggedPlayer, dragOverInfo } = state
+    const [sortMode, setSortMode] = useState(false)
 
-    const selections = getters.getTeamActiveSelections(team.id)
+    const selections  = getters.getTeamActiveSelections(team.id)
     const unavailSels = getters.getTeamUnavailableSelections(team.id)
-    const match = getters.getMatchDetails(team.id)
-    const counts = getters.getTeamCounts(team.id)
-    const posCounts = getters.getPositionCounts(team.id)
+    const match       = getters.getMatchDetails(team.id)
+    const counts      = getters.getTeamCounts(team.id)
+    const posCounts   = getters.getPositionCounts(team.id)
+    // is_home comes from Firestore (seeded from fixture JSON)
+    // Fall back to venue name check if not set
+    const isHome  = match.is_home ?? match.venue?.toLowerCase().includes('mentone') ?? false
+    const clash   = !isHome ? checkClash(match.opponent) : { shirt: false, socks: false }
+
+    // Auto-apply kit defaults when opponent is already set (e.g. seeded from fixture)
+    // Only fires when opponent changes and kit is still on default values
+    useEffect(() => {
+        if (!match.opponent) return
+        const isHomeGame = match.is_home ?? match.venue?.toLowerCase().includes('mentone') ?? false
+        const { shirt, socks } = isHomeGame ? { shirt: false, socks: false } : checkClash(match.opponent)
+        const updates = {}
+        const currentTop   = (match.top_colour   || 'blue').toLowerCase()
+        const currentSocks = (match.socks_colour || 'yellow').toLowerCase()
+        // Only auto-set if still on default — don't override a manual change
+        if (currentTop === 'blue' || currentTop === 'white') {
+            const correct = shirt ? 'White' : 'Blue'
+            if (currentTop !== correct.toLowerCase()) updates.top_colour = correct
+        }
+        if (currentSocks === 'yellow' || currentSocks === 'blue') {
+            const correct = socks ? 'Blue' : 'Yellow'
+            if (currentSocks !== correct.toLowerCase()) updates.socks_colour = correct
+        }
+        if (Object.keys(updates).length > 0) {
+            actions.updateMatchDetails(team.id, updates)
+        }
+    }, [match.opponent, match.venue]) // eslint-disable-line react-hooks/exhaustive-deps
 
     const KIT_COLOURS = {
-        top_colour:   { label: '👕 Top',   options: ['', 'Blue', 'White'] },
-        socks_colour: { label: '🧦 Socks', options: ['', 'Yellow', 'Blue'] },
-    }
-
-    const chipStyle = val => {
-        const v = (val || '').toLowerCase()
-        if (v === 'yellow') return { background: '#eab308', color: '#1e293b', borderColor: '#ca8a04' }
-        if (v === 'blue')   return { background: '#1e3a8a', color: '#fff',    borderColor: '#1d4ed8' }
-        if (v === 'white')  return { background: '#f1f5f9', color: '#1e293b', borderColor: '#94a3b8' }
-        return { background: '#1e293b', color: '#64748b', borderColor: '#334155' }
+        top_colour:   { options: ['Blue', 'White'] },
+        socks_colour: { options: ['Yellow', 'Blue'] },
     }
 
     return (
@@ -35,62 +58,112 @@ export default function TeamColumn({
             onDragOver={(e) => actions.handleDragOverColumn(e, team.id)}
             onDrop={(e) => actions.handleDrop(e, team.id, null)}
         >
+
             {/* ── Team Header ── */}
             <div className="text-white" style={{ background: '#0f172a' }}>
                 <div style={{ background: '#eab308', height: '4px' }} />
                 <div className="flex items-center justify-between px-3 py-2" style={{ background: '#1e3a8a' }}>
                     <div className="font-bold text-sm tracking-wide">{team.id}</div>
-                    <div className="flex items-center gap-1.5 text-xs">
-                        {counts.confirmed > 0 && <span className="text-green-300 font-medium">{counts.confirmed}✓</span>}
-                        {counts.waiting > 0 && <span className="text-yellow-300 font-medium">{counts.waiting}?</span>}
-                        {counts.unavailable > 0 && <span className="text-red-300 font-medium">{counts.unavailable}✕</span>}
-                        {counts.unavailableBucket > 0 && <span className="text-slate-400 font-medium" title="In unavailable bucket">{counts.unavailableBucket}off</span>}
-                        <span className={`font-bold ml-0.5 ${counts.total >= 11 && counts.total <= 16 ? 'text-white' : counts.total > 16 ? 'text-orange-300' : 'text-red-300'}`}>{counts.total}</span>
+                    <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5 text-xs">
+                            {counts.confirmed > 0 && <span className="text-green-300 font-medium">{counts.confirmed}✓</span>}
+                            {counts.waiting > 0 && <span className="text-yellow-300 font-medium">{counts.waiting}?</span>}
+                            {counts.uncontacted > 0 && <span className="text-slate-400 font-medium">{counts.uncontacted}–</span>}
+                            <span className={`font-bold ml-0.5 ${counts.active >= 11 && counts.active <= 16 ? 'text-white' : counts.active > 16 ? 'text-orange-300' : 'text-red-300'}`}>
+                                {counts.active}
+                            </span>
+                        </div>
+                        {/* Sort mode toggle — mobile only */}
+                        <button
+                            onClick={() => setSortMode(m => !m)}
+                            className={`sm:hidden w-7 h-7 flex items-center justify-center rounded transition-colors flex-shrink-0
+                                ${sortMode ? 'bg-yellow-400 text-slate-900' : 'bg-white/10 text-white/60 hover:bg-white/20'}`}
+                            title={sortMode ? 'Exit sort mode' : 'Sort players'}
+                        >
+                            <ArrowUpDown size={13} strokeWidth={2.5} />
+                        </button>
                     </div>
                 </div>
 
                 {/* ── Match Inline Details ── */}
-                <div className="px-3 py-2 space-y-1.5" style={{ background: '#0f172a' }}>
-                    <div className="flex items-center gap-2">
-                        <span className="text-slate-500 text-xs w-10 flex-shrink-0">Date</span>
-                        <input
-                            type="date"
-                            defaultValue={match.match_date || ''}
-                            onBlur={e => actions.updateMatchDetails(team.id, { match_date: e.target.value })}
-                            className="flex-1 bg-transparent text-white text-xs py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400"
-                            style={{ colorScheme: 'dark' }}
-                        />
+                <div className="px-3 py-2 space-y-1" style={{ background: '#1e293b' }}>
+
+                    {/* vs — most important, first */}
+                    <input
+                        type="text"
+                        defaultValue={match.opponent || ''}
+                        placeholder="vs"
+                        onBlur={e => {
+                            const opponent = e.target.value
+                            const updates = { opponent }
+                            const isHomeGame = match.is_home ?? match.venue?.toLowerCase().includes('mentone') ?? false
+                            const { shirt, socks } = isHomeGame ? { shirt: false, socks: false } : checkClash(opponent)
+                            const currentTop   = (match.top_colour   || 'blue').toLowerCase()
+                            const currentSocks = (match.socks_colour || 'yellow').toLowerCase()
+                            if (currentTop === 'blue' || currentTop === 'white')
+                                updates.top_colour = shirt ? 'White' : 'Blue'
+                            if (currentSocks === 'yellow' || currentSocks === 'blue')
+                                updates.socks_colour = socks ? 'Blue' : 'Yellow'
+                            actions.updateMatchDetails(team.id, updates)
+                        }}
+                        className="w-full bg-transparent text-white placeholder-slate-500 text-sm font-semibold px-0 py-0.5 border-0 border-b border-slate-600 focus:outline-none focus:border-yellow-400"
+                    />
+
+                    {/* Time + Arrive on one row */}
+                    <div className="flex gap-3">
+                        <input type="text" defaultValue={match.time || ''} placeholder="Time"
+                            onBlur={e => actions.updateMatchDetails(team.id, { time: e.target.value })}
+                            className="flex-1 bg-transparent text-slate-300 placeholder-slate-600 text-xs px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400" />
+                        <input type="text" defaultValue={match.arrive_at || ''} placeholder="Arrive"
+                            onBlur={e => actions.updateMatchDetails(team.id, { arrive_at: e.target.value })}
+                            className="flex-1 bg-transparent text-slate-300 placeholder-slate-600 text-xs px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400" />
                     </div>
 
-                    {[
-                        { key: 'time',      placeholder: 'Time' },
-                        { key: 'arrive_at', placeholder: 'Arrive' },
-                        { key: 'opponent',  placeholder: 'vs' },
-                        { key: 'venue',     placeholder: 'Venue' },
-                    ].map(({ key, placeholder }) => (
-                        <input
-                            key={key}
-                            type="text"
-                            defaultValue={match[key] || ''}
-                            placeholder={placeholder}
-                            onBlur={e => actions.updateMatchDetails(team.id, { [key]: e.target.value })}
-                            className="w-full bg-transparent text-white placeholder-slate-500 text-xs px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400"
-                        />
-                    ))}
+                    {/* Venue */}
+                    <input type="text" defaultValue={match.venue || ''} placeholder="Venue"
+                        onBlur={e => actions.updateMatchDetails(team.id, { venue: e.target.value })}
+                        className="w-full bg-transparent text-slate-300 placeholder-slate-600 text-xs px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400" />
 
-                    <div className="flex gap-2 pt-0.5">
-                        {Object.entries(KIT_COLOURS).map(([key, { label, options }]) => {
-                            const val = match[key] || ''
+                    {/* Date */}
+                    <input type="date" defaultValue={match.match_date || ''}
+                        onBlur={e => actions.updateMatchDetails(team.id, { match_date: e.target.value })}
+                        className="w-full bg-transparent text-slate-500 text-xs py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400"
+                        style={{ colorScheme: 'dark' }} />
+
+                    {/* Kit row — compact outlined selects + clash icon inline */}
+                    <div className="flex items-center gap-2 pt-0.5">
+                        {Object.entries(KIT_COLOURS).map(([key, { options }]) => {
+                            const defaults = { top_colour: 'Blue', socks_colour: 'Yellow' }
+                            const raw = match[key] || defaults[key]
+                            const val = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase()
+                            const isClash = (key === 'top_colour' && clash.shirt) ||
+                                            (key === 'socks_colour' && clash.socks)
                             return (
-                                <div key={key} className="flex-1">
+                                <div key={key} className="relative flex-1">
                                     <select
                                         value={val}
                                         onChange={e => actions.updateMatchDetails(team.id, { [key]: e.target.value })}
-                                        style={{ ...chipStyle(val), borderWidth: '1px', borderStyle: 'solid' }}
-                                        className="w-full text-xs font-semibold rounded-full px-2 py-0.5 text-center appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-yellow-400"
+                                        className={`w-full text-xs font-medium rounded px-2 py-1 text-center
+                                                   appearance-none cursor-pointer focus:outline-none
+                                                   bg-transparent border transition-colors
+                                                   ${isClash
+                                                     ? 'border-amber-400 text-amber-300'
+                                                     : 'border-slate-600 text-slate-300 hover:border-slate-400'}`}
                                     >
-                                        {options.map(o => <option key={o} value={o} style={{ background: '#1e293b', color: '#fff' }}>{o || label}</option>)}
+                                        {options.map(o => (
+                                            <option key={o} value={o}
+                                                    style={{ background: '#1e293b', color: '#fff' }}>
+                                                {o}
+                                            </option>
+                                        ))}
                                     </select>
+                                    {isClash && (
+                                        <AlertTriangle
+                                            size={10}
+                                            className="absolute -top-1 -right-1 text-amber-400"
+                                            strokeWidth={2.5}
+                                        />
+                                    )}
                                 </div>
                             )
                         })}
@@ -98,45 +171,85 @@ export default function TeamColumn({
                 </div>
             </div>
 
+
             {/* ── Player List ── */}
             <div className="min-h-[40px]" onDragOver={(e) => actions.handleDragOverEmpty(e, team.id)} onDrop={(e) => actions.handleDrop(e, team.id, null)}>
                 {selections.map((sel, idx) => {
-                    const avail = AVAILABILITY[sel.confirmed ?? 0]
-                    const isDupe = duplicateIds.has(sel.player_id)
+                    const avail     = AVAILABILITY[sel.confirmed ?? 0]
+                    const isDupe    = duplicateIds.has(sel.player_id)
                     const isDragOver = dragOverInfo?.teamId === team.id && dragOverInfo?.playerId === sel.player_id
-                    const posStyle = sel.position ? POSITION_STYLES[sel.position] : null
+                    const posStyle  = sel.position ? POSITION_STYLES[sel.position] : null
 
                     return (
                         <div
                             key={`${sel.team_id}-${sel.player_id}`}
                             data-player-id={sel.player_id}
                             data-team-id={team.id}
-                            draggable
-                            onDragStart={(e) => actions.handleDragStart(e, sel, team.id)}
-                            onDragOver={(e) => actions.handleDragOverRow(e, team.id, sel.player_id)}
-                            onDrop={(e) => actions.handleDrop(e, team.id, sel.player_id)}
-                            onDragEnd={actions.handleDragEnd}
+                            draggable={!sortMode}
+                            onDragStart={!sortMode ? (e) => actions.handleDragStart(e, sel, team.id) : undefined}
+                            onDragOver={!sortMode ? (e) => actions.handleDragOverRow(e, team.id, sel.player_id) : undefined}
+                            onDrop={!sortMode ? (e) => actions.handleDrop(e, team.id, sel.player_id) : undefined}
+                            onDragEnd={!sortMode ? actions.handleDragEnd : undefined}
                             style={{
                                 borderLeft: posStyle ? `3px solid ${posStyle.border}` : '3px solid transparent',
-                                backgroundColor: posStyle ? posStyle.rowBg : undefined,
+                                backgroundColor: posStyle ? posStyle.rowBg : (sortMode ? '#eff6ff' : undefined),
                                 ...(draggedPlayer ? { userSelect: 'none' } : {}),
                             }}
-                            className={`border-b border-slate-100 text-sm transition-colors ${!posStyle ? 'hover:bg-slate-50' : ''} ${isDragOver ? (dragOverInfo.position === 'above' ? 'border-t-2 border-t-blue-400' : 'border-b-2 border-b-blue-400') : ''}`}
+                            className={`border-b border-slate-100 text-sm transition-colors
+                                ${!posStyle && !sortMode ? 'hover:bg-slate-50' : ''}
+                                ${isDragOver && !sortMode ? (dragOverInfo.position === 'above' ? 'border-t-2 border-t-blue-400' : 'border-b-2 border-b-blue-400') : ''}`}
                         >
-                            <div className="flex items-center gap-2 px-3 py-2 w-full" style={{ pointerEvents: draggedPlayer ? 'none' : 'auto' }}>
-                                <span className="text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing flex-shrink-0 px-0.5 touch-none select-none" onTouchStart={(e) => actions.handleTouchStart(e, sel, team.id)} onTouchMove={actions.handleTouchMove} onTouchEnd={actions.handleTouchEnd}>⠿</span>
+                            <div className={`flex items-center gap-2 px-3 w-full ${sortMode ? 'py-3' : 'py-2'}`}
+                                 style={{ pointerEvents: draggedPlayer ? 'none' : 'auto' }}>
+
+                                {/* Sort mode: ↑↓ buttons (mobile) vs drag handle (desktop always, mobile when not in sort mode) */}
+                                {sortMode ? (
+                                    <div className="flex flex-col gap-0.5 flex-shrink-0 -my-1">
+                                        <button
+                                            onClick={() => idx > 0 && actions.moveSelectionByIndex(team.id, idx, idx - 1)}
+                                            disabled={idx === 0}
+                                            className="w-8 h-7 flex items-center justify-center rounded text-slate-500 hover:text-blue-600 hover:bg-blue-100 disabled:opacity-20 transition-colors font-bold text-base"
+                                        >↑</button>
+                                        <button
+                                            onClick={() => idx < selections.length - 1 && actions.moveSelectionByIndex(team.id, idx, idx + 1)}
+                                            disabled={idx === selections.length - 1}
+                                            className="w-8 h-7 flex items-center justify-center rounded text-slate-500 hover:text-blue-600 hover:bg-blue-100 disabled:opacity-20 transition-colors font-bold text-base"
+                                        >↓</button>
+                                    </div>
+                                ) : (
+                                    <span
+                                        className="text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing flex-shrink-0 touch-none select-none"
+                                        style={{ padding: '12px 10px', margin: '-12px -4px', fontSize: '16px', lineHeight: 1 }}
+                                        onTouchStart={(e) => actions.handleTouchStart(e, sel, team.id)}
+                                        onTouchMove={actions.handleTouchMove}
+                                        onTouchEnd={actions.handleTouchEnd}
+                                    >⠿</span>
+                                )}
+
                                 <span className="text-slate-400 text-xs w-4 text-center flex-shrink-0">{idx + 1}</span>
-                                <button onClick={() => actions.toggleConfirmed(team.id, sel.player_id)} title={avail.title} className={`w-5 h-5 rounded-full border-2 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${avail.bg} ${avail.border}`}>{avail.icon}</button>
+                                <button onClick={() => actions.toggleConfirmed(team.id, sel.player_id)} title={avail.title}
+                                    className={`w-5 h-5 rounded-full border-2 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${avail.bg} ${avail.border}`}>
+                                    {avail.icon}
+                                </button>
                                 <div className="flex-1 flex items-center gap-1.5 min-w-0">
-                                    <span className="truncate cursor-pointer hover:text-blue-600" onClick={() => onSelectPlayer && onSelectPlayer(allPlayers.find(p => p.id === sel.player_id) || { id: sel.player_id, name: sel.name })}>{sel.name}</span>
-                                    {roundUnavailability[sel.player_id] ? <span className="w-2 h-2 rounded-full flex-shrink-0 bg-red-400" /> : <span className="w-2 h-2 rounded-full flex-shrink-0 bg-green-400" />}
+                                    <span className="truncate cursor-pointer hover:text-blue-600"
+                                        onClick={() => onSelectPlayer && onSelectPlayer(allPlayers.find(p => p.id === sel.player_id) || { id: sel.player_id, name: sel.name })}>
+                                        {sel.name}
+                                    </span>
+                                    {roundUnavailability[sel.player_id]
+                                        ? <span className="w-2 h-2 rounded-full flex-shrink-0 bg-red-400" />
+                                        : <span className="w-2 h-2 rounded-full flex-shrink-0 bg-green-400" />}
                                     {isDupe && <span className="text-xs bg-orange-100 text-orange-600 px-1 rounded font-bold flex-shrink-0">2×</span>}
                                 </div>
-                                <select value={sel.position || ''} onChange={(e) => actions.updatePosition(sel.player_id, e.target.value)} className={`text-xs rounded px-1 py-0.5 w-14 flex-shrink-0 border font-medium ${posStyle ? posStyle.selectCls : 'border-slate-200 text-slate-400 bg-white'}`}>
-                                    <option value="">Pos</option>
-                                    {POSITIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                                </select>
-                                <button onClick={() => actions.removePlayer(team.id, sel.player_id)} className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
+                                {!sortMode && (
+                                    <select value={sel.position || ''} onChange={(e) => actions.updatePosition(sel.player_id, e.target.value)}
+                                        className={`text-xs rounded px-1 py-0.5 w-14 flex-shrink-0 border font-medium ${posStyle ? posStyle.selectCls : 'border-slate-200 text-slate-400 bg-white'}`}>
+                                        <option value="">Pos</option>
+                                        {POSITIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                                    </select>
+                                )}
+                                <button onClick={() => actions.removePlayer(team.id, sel.player_id)}
+                                    className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
                                     <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                                         <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
                                     </svg>
@@ -152,44 +265,73 @@ export default function TeamColumn({
                 )}
             </div>
 
-            {/* ── Unavailable Bucket ── */}
-            {(unavailSels.length > 0 || (draggedPlayer?.fromTeamId === team.id && !draggedPlayer?.fromBucket)) && (
-                <div data-bucket-team={team.id} className={`border-t-2 border-dashed transition-colors ${draggedPlayer?.fromTeamId === team.id && !draggedPlayer?.fromBucket ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-slate-50'}`} onDragOver={(e) => { e.preventDefault(); e.stopPropagation() }} onDrop={(e) => actions.handleDropToBucket(e, team.id)}>
-                    <div className="flex items-center gap-1.5 px-3 py-1.5">
-                        <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Unavailable</span>
-                        {unavailSels.length > 0 && <span className="text-xs bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded-full font-semibold">{unavailSels.length}</span>}
-                    </div>
-                    {unavailSels.map(sel => (
-                        <div key={`unavail-${sel.team_id}-${sel.player_id}`} data-player-id={sel.player_id} data-team-id={team.id} draggable onDragStart={(e) => actions.handleDragStart(e, sel, team.id, true)} onDragEnd={actions.handleDragEnd} className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 text-sm hover:bg-red-50 group">
-                            <span className="text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing flex-shrink-0 px-0.5 select-none" onTouchStart={(e) => actions.handleTouchStart(e, sel, team.id, true)} onTouchMove={actions.handleTouchMove} onTouchEnd={actions.handleTouchEnd}>⠿</span>
-                            <div className="flex-1 flex items-center gap-1.5 min-w-0">
-                                <span className="truncate text-slate-400 line-through text-xs cursor-pointer hover:text-blue-500 no-underline" onClick={() => onSelectPlayer && onSelectPlayer(allPlayers.find(p => p.id === sel.player_id) || { id: sel.player_id, name: sel.name })}>{sel.name}</span>
-                            </div>
-                            <button onClick={() => actions.markSelectionUnavailable(team.id, sel.player_id, false)} className="text-slate-400 hover:text-blue-500 text-xs sm:opacity-0 sm:group-hover:opacity-100 flex-shrink-0">↑ squad</button>
-                            <button onClick={() => actions.removePlayer(team.id, sel.player_id)} className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                                </svg>
-                            </button>
-                        </div>
-                    ))}
-                </div>
-            )}
 
-            {/* ── Add Player Footer ── */}
+            {/* ── Unavailable Bucket ── */}
+            <div
+                data-bucket-team={team.id}
+                className={`border-t-2 border-dashed transition-colors duration-150
+                    ${unavailSels.length === 0 && !(draggedPlayer?.fromTeamId === team.id && !draggedPlayer?.fromBucket)
+                        ? 'hidden'
+                        : draggedPlayer?.fromTeamId === team.id && !draggedPlayer?.fromBucket
+                            ? 'border-red-300 bg-red-50'
+                            : 'border-slate-200 bg-slate-50'
+                    }`}
+                onDragOver={(e) => { e.preventDefault(); e.stopPropagation() }}
+                onDrop={(e) => actions.handleDropToBucket(e, team.id)}
+            >
+                <div className="flex items-center gap-1.5 px-3 py-1.5">
+                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Unavailable</span>
+                    {unavailSels.length > 0 && <span className="text-xs bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded-full font-semibold">{unavailSels.length}</span>}
+                </div>
+                {unavailSels.map(sel => (
+                    <div key={`unavail-${sel.team_id}-${sel.player_id}`}
+                        data-player-id={sel.player_id} data-team-id={team.id}
+                        draggable onDragStart={(e) => actions.handleDragStart(e, sel, team.id, true)} onDragEnd={actions.handleDragEnd}
+                        className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 text-sm hover:bg-red-50 group">
+                        <span
+                            className="text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing flex-shrink-0 touch-none select-none"
+                            style={{ padding: '12px 10px', margin: '-12px -4px', fontSize: '16px', lineHeight: 1 }}
+                            onTouchStart={(e) => actions.handleTouchStart(e, sel, team.id, true)}
+                            onTouchMove={actions.handleTouchMove}
+                            onTouchEnd={actions.handleTouchEnd}
+                        >⠿</span>
+                        <div className="flex-1 flex items-center gap-1.5 min-w-0">
+                            <span className="truncate text-red-400 text-xs cursor-pointer hover:text-blue-500"
+                                onClick={() => onSelectPlayer && onSelectPlayer(allPlayers.find(p => p.id === sel.player_id) || { id: sel.player_id, name: sel.name })}>
+                                {sel.name}
+                            </span>
+                        </div>
+                        <button onClick={() => actions.markSelectionUnavailable(team.id, sel.player_id, false)}
+                            className="text-slate-400 hover:text-blue-500 text-xs sm:opacity-0 sm:group-hover:opacity-100 flex-shrink-0">↑ squad</button>
+                        <button onClick={() => actions.removePlayer(team.id, sel.player_id)}
+                            className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                            </svg>
+                        </button>
+                    </div>
+                ))}
+            </div>
+
+            {/* ── Position summary + Add player ── */}
             {(() => {
                 const hasAny = Object.keys(posCounts).length > 0
                 if (!hasAny) return null
                 return (
                     <div className="flex flex-wrap gap-1 px-3 py-1.5 border-t border-slate-100 bg-slate-50">
                         {POSITIONS.filter(p => posCounts[p.value]).map(p => (
-                            <span key={p.value} className={`text-xs px-1.5 py-0.5 rounded border font-semibold ${POSITION_STYLES[p.value].badge}`}>{p.label} {posCounts[p.value]}</span>
+                            <span key={p.value} className={`text-xs px-1.5 py-0.5 rounded border font-semibold ${POSITION_STYLES[p.value].badge}`}>
+                                {p.label} {posCounts[p.value]}
+                            </span>
                         ))}
                     </div>
                 )
             })()}
             <div className="p-2">
-                <button onClick={() => setPickerOpen({ teamId: team.id })} className="w-full py-1.5 text-sm text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-dashed border-slate-200 hover:border-blue-300 rounded transition-colors">+ Add player</button>
+                <button onClick={() => setPickerOpen({ teamId: team.id })}
+                    className="w-full py-1.5 text-sm text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-dashed border-slate-200 hover:border-blue-300 rounded transition-colors">
+                    + Add player
+                </button>
             </div>
         </div>
     )

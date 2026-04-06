@@ -3,7 +3,7 @@
 import { db } from './firebase'
 import {
   collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
-  addDoc, query, where, orderBy, writeBatch, deleteField, arrayUnion
+  addDoc, query, where, orderBy, writeBatch, deleteField, arrayUnion, arrayRemove, increment
 } from 'firebase/firestore'
 import { getNextConfirmedState } from './utils.js'
 
@@ -90,7 +90,13 @@ export async function getPlayer(playerId) {
 }
 
 export async function createPlayer(data) {
-  const ref = await addDoc(collection(db, 'players'), {
+  // Use sequential numeric IDs to match the existing "1", "2", ... convention.
+  // addDoc generates random string IDs which break Number(id) throughout the app.
+  const snap = await getDocs(collection(db, 'players'))
+  const numericIds = snap.docs.map(d => parseInt(d.id, 10)).filter(n => !isNaN(n))
+  const nextId = String(numericIds.length > 0 ? Math.max(...numericIds) + 1 : 1)
+
+  await setDoc(doc(db, 'players', nextId), {
     name: data.name,
     statusId: data.status_id || 'new',
     defaultPosition: data.default_position || null,
@@ -113,7 +119,18 @@ export async function createPlayer(data) {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   })
-  return { id: Number(ref.id) || ref.id, name: data.name }
+  return { id: Number(nextId), name: data.name }
+}
+
+export async function removeTeamPlayed(playerId, teamId) {
+  // Removes a team from teamsPlayed2026 and zeroes out the game count for that team.
+  // Used to clean up polluted data from practice matches etc.
+  const updates = {
+    teamsPlayed2026: arrayRemove(teamId),
+    [`gamesPlayed2026.${teamId}`]: 0,
+    updatedAt: new Date().toISOString(),
+  }
+  await updateDoc(doc(db, 'players', String(playerId)), updates)
 }
 
 export async function updatePlayer(playerId, data) {
@@ -378,9 +395,10 @@ export async function addSelectionBatch(roundId, players) {
       isUnavailable: false,
     })
     ids.push(ref.id)
-    // Atomically add team to player's teamsPlayed2026 array (arrayUnion is idempotent)
+    // Atomically add team to player's teamsPlayed2026 array and increment game count
     batch.update(doc(db, 'players', String(player_id)), {
       teamsPlayed2026: arrayUnion(team_id),
+      [`gamesPlayed2026.${team_id}`]: increment(1),
       updatedAt: new Date().toISOString(),
     })
   }
@@ -399,9 +417,10 @@ export async function addSelection(roundId, { team_id, player_id, slot_number })
     confirmed: false,
     isUnavailable: false,
   })
-  // Keep teamsPlayed2026 in sync (arrayUnion is idempotent — safe to call every time)
+  // Keep teamsPlayed2026 and gamesPlayed2026 in sync
   batch.update(doc(db, 'players', String(player_id)), {
     teamsPlayed2026: arrayUnion(team_id),
+    [`gamesPlayed2026.${team_id}`]: increment(1),
     updatedAt: new Date().toISOString(),
   })
   await batch.commit()
@@ -417,12 +436,16 @@ export async function removeSelection(roundId, teamId, playerId) {
   })
   if (target) {
     await deleteDoc(target.ref)
-    // Re-number remaining slots for that team
+    // Re-number remaining slots and decrement game count
     const remaining = selsSnap.docs
       .filter(d => d.id !== target.id && d.data().teamId === teamId)
       .sort((a, b) => (a.data().slotNumber || 0) - (b.data().slotNumber || 0))
     const batch = writeBatch(db)
     remaining.forEach((d, i) => batch.update(d.ref, { slotNumber: i + 1 }))
+    batch.update(doc(db, 'players', String(playerId)), {
+      [`gamesPlayed2026.${teamId}`]: increment(-1),
+      updatedAt: new Date().toISOString(),
+    })
     await batch.commit()
   }
 }
@@ -434,7 +457,9 @@ export async function updateSelectionUnavailable(roundId, teamId, playerId, isUn
     return data.teamId === teamId && String(data.playerId) === String(playerId)
   })
   if (target) {
-    await updateDoc(target.ref, { isUnavailable: isUnavailable })
+    const updates = { isUnavailable }
+    if (isUnavailable) updates.confirmed = 0  // reset state when moved to bucket
+    await updateDoc(target.ref, updates)
   }
 }
 
@@ -656,4 +681,37 @@ export async function getTeamPlayers(teamId) {
   const mainSquad = players.filter(p => p.primary_team_id_2025 === teamId)
 
   return { mainSquad, fillIns: [], squad2026 }
+}
+
+// ─── HV Fixture & Sync ───────────────────────────────────────────────────────
+
+// Lightweight match fetch — no selections, no player hydration.
+// Used by FixtureView to render all teams for a given round.
+export async function getRoundMatches(roundId) {
+  const snap = await getDocs(collection(db, 'rounds', String(roundId), 'matches'))
+  return snap.docs.map(d => {
+    const data = d.data()
+    return {
+      team_id:       d.id,
+      match_date:    data.matchDate  || '',
+      time:          data.time       || '',
+      venue:         data.venue      || '',
+      opponent:      data.opponent   || '',
+      arrive_at:     data.arriveAt   || '',
+      top_colour:    data.topColour  || '',
+      socks_colour:  data.socksColour || '',
+      score_for:     data.scoreFor     ?? null,
+      score_against: data.scoreAgainst ?? null,
+      result:        data.result     || '',
+      scorers:       data.scorers    || [],
+      is_home:       data.isHome      ?? null,
+    }
+  })
+}
+
+// Returns the most recent HV sync digest from Firestore.
+export async function getHvSync() {
+  const snap = await getDoc(doc(db, 'hvSync', 'latest'))
+  if (!snap.exists()) return null
+  return snap.data()
 }
