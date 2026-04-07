@@ -182,6 +182,7 @@ export default function UnavailabilityManager({ onSelectPlayer }) {
                 {/* Remove */}
                 <button
                   onClick={() => removeEntry(player.id, rid)}
+                  aria-label={`Remove ${player.name} from unavailability`}
                   className="w-3 text-slate-200 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 text-xs leading-none"
                   title="Remove"
                 >×</button>
@@ -247,6 +248,7 @@ export default function UnavailabilityManager({ onSelectPlayer }) {
                 </p>
               </div>
               <button onClick={() => setPickerRound(null)}
+                aria-label="Close picker modal"
                 className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
             </div>
 
