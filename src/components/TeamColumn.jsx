@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { ArrowUpDown, AlertTriangle } from 'lucide-react'
 import { AVAILABILITY, POSITIONS, POSITION_STYLES } from './roundUtils'
-import { checkClash } from '../kitClashes'
+import { checkClash } from '../utils'
 
 export default function TeamColumn({
     team, state, actions, getters, duplicateIds, onSelectPlayer, setPickerOpen
