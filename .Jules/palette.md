@@ -1,0 +1,3 @@
+## 2025-04-09 - Accessible Icon-Only Buttons in List Items
+**Learning:** In list or grid components (like player lists in TeamColumn), generic icon-only buttons (like "Remove" or "Status") create severe accessibility issues for screen readers because they lack context (e.g., announcing just "Remove" 15 times).
+**Action:** Always use context-injected `aria-label` attributes for list-item buttons (e.g., `aria-label="Remove [Player Name] from squad"`). Pair this with proper `focus-visible` utility classes to ensure keyboard navigability, adding small padding (`p-0.5`) to SVG buttons so the focus ring isn't uncomfortably tight around the icon.
