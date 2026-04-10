@@ -1,13 +1,101 @@
-import { useState, useEffect } from 'react'
-import { ArrowUpDown, AlertTriangle } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { ArrowUpDown, AlertTriangle, MapPin, MessageSquare } from 'lucide-react'
 import { AVAILABILITY, POSITIONS, POSITION_STYLES } from './roundUtils'
 import { checkClash } from '../kitClashes'
+
+// ── Note Popover ─────────────────────────────────────────────────────────────
+// Renders fixed to viewport so it escapes overflow:hidden on the team column
+function NotePopover({ sel, anchorRef, onSave, onClose }) {
+    const [text, setText] = useState(sel.note || '')
+    const [pos, setPos] = useState({ top: 0, left: 0 })
+    const popoverRef = useRef(null)
+    const textareaRef = useRef(null)
+
+    useEffect(() => {
+        if (anchorRef?.current) {
+            const rect = anchorRef.current.getBoundingClientRect()
+            const popW = 256
+            const vw = window.innerWidth
+            let left = rect.left
+            if (left + popW > vw - 8) left = vw - popW - 8
+            if (left < 8) left = 8
+            setPos({ top: rect.bottom + 4, left })
+        }
+        textareaRef.current?.focus()
+    }, [anchorRef])
+
+    useEffect(() => {
+        const handler = (e) => {
+            if (
+                popoverRef.current && !popoverRef.current.contains(e.target) &&
+                anchorRef?.current && !anchorRef.current.contains(e.target)
+            ) onClose()
+        }
+        document.addEventListener('mousedown', handler)
+        return () => document.removeEventListener('mousedown', handler)
+    }, [onClose, anchorRef])
+
+    const handleSave = () => { onSave(text.trim()); onClose() }
+    const handleClear = () => { onSave(''); onClose() }
+
+    return (
+        <div ref={popoverRef}
+            className="fixed z-50 bg-white border border-slate-200 rounded-lg shadow-xl p-3 w-64"
+            style={{ top: pos.top, left: pos.left }}
+            onMouseDown={e => e.stopPropagation()}>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Round note</p>
+            <textarea
+                ref={textareaRef}
+                value={text}
+                onChange={e => setText(e.target.value)}
+                onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSave() }
+                    if (e.key === 'Escape') onClose()
+                }}
+                rows={3}
+                placeholder="e.g. limited minutes – sore hammy"
+                className="w-full text-sm border border-slate-200 rounded px-2 py-1.5 resize-none focus:outline-none focus:border-blue-400 text-slate-700"
+            />
+            <div className="flex gap-2 mt-2">
+                <button onClick={handleSave}
+                    className="flex-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded py-1.5 font-semibold transition-colors">
+                    Save
+                </button>
+                {sel.note && (
+                    <button onClick={handleClear}
+                        className="text-xs text-slate-400 hover:text-red-500 px-2 transition-colors">
+                        Clear
+                    </button>
+                )}
+                <button onClick={onClose}
+                    className="text-xs text-slate-400 hover:text-slate-600 px-2 transition-colors">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    )
+}
 
 export default function TeamColumn({
     team, state, actions, getters, duplicateIds, onSelectPlayer, setPickerOpen
 }) {
-    const { allPlayers, roundUnavailability, draggedPlayer, dragOverInfo } = state
+    const { allPlayers, roundUnavailability, draggedPlayer, dragOverInfo, currentRound } = state
+
+    // Derive availability dot colour for a player in this team
+    // Green = available, Purple = unavailable other day only, Red = unavailable this day
+    const getAvailDot = (playerId) => {
+        const unavail = roundUnavailability[playerId]
+        if (!unavail) return 'green'
+        if (unavail === 'both') return 'red'
+        // Work out which day this team plays
+        const matchDay = match.match_date === currentRound?.sat_date ? 'sat'
+                       : match.match_date === currentRound?.sun_date ? 'sun'
+                       : null
+        if (!matchDay) return 'red' // no match date set — safe fallback
+        return unavail === matchDay ? 'red' : 'purple'
+    }
     const [sortMode, setSortMode] = useState(false)
+    const [noteOpenId, setNoteOpenId] = useState(null) // selectionId of open popover
 
     const selections  = getters.getTeamActiveSelections(team.id)
     const unavailSels = getters.getTeamUnavailableSelections(team.id)
@@ -43,9 +131,23 @@ export default function TeamColumn({
     }, [match.opponent, match.venue]) // eslint-disable-line react-hooks/exhaustive-deps
 
     const KIT_COLOURS = {
-        top_colour:   { options: ['Blue', 'White'] },
-        socks_colour: { options: ['Yellow', 'Blue'] },
+        top_colour:   { options: ['Blue', 'White'],  label: 'Top' },
+        socks_colour: { options: ['Yellow', 'Blue'], label: 'Socks' },
     }
+
+    // Format date as "Sat 11 Apr"
+    const fmtMatchDate = d => {
+        if (!d) return null
+        const dt = new Date(d + 'T00:00:00')
+        const day = dt.toLocaleDateString('en-AU', { weekday: 'short' })
+        const num = dt.toLocaleDateString('en-AU', { day: 'numeric' })
+        const mon = dt.toLocaleDateString('en-AU', { month: 'short' })
+        return `${day} ${num} ${mon}`
+    }
+    const matchDateLabel = fmtMatchDate(match.match_date)
+
+    // Derive kit colour for border highlight
+    const kitColourMap = { white: '#e2e8f0', blue: '#3b82f6', yellow: '#eab308' }
 
     return (
         <div
@@ -88,85 +190,92 @@ export default function TeamColumn({
                 {/* ── Match Inline Details ── */}
                 <div className="px-3 pt-2.5 pb-2 space-y-1.5" style={{ background: '#1e293b' }}>
 
-                    {/* Venue — top, scan for double-ups */}
-                    <input type="text" defaultValue={match.venue || ''} placeholder="Venue"
-                        onBlur={e => actions.updateMatchDetails(team.id, { venue: e.target.value })}
-                        className="w-full bg-transparent text-slate-200 placeholder-slate-600 text-xs font-medium px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400" />
-
-                    {/* Date + Time on one row — time dominates */}
-                    <div className="flex items-baseline gap-3">
-                        <input type="date" defaultValue={match.match_date || ''}
-                            onBlur={e => actions.updateMatchDetails(team.id, { match_date: e.target.value })}
-                            className="flex-none bg-transparent text-slate-500 text-xs py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400"
-                            style={{ colorScheme: 'dark' }} />
-                        <input type="text" defaultValue={match.time || ''} placeholder="Time"
-                            onBlur={e => actions.updateMatchDetails(team.id, { time: e.target.value })}
-                            className="w-20 flex-none bg-transparent text-white placeholder-slate-600 text-base font-semibold tabular-nums px-0 py-0.5 border-0 border-b border-slate-600 focus:outline-none focus:border-yellow-400" />
+                    {/* Venue with map pin icon */}
+                    <div className="flex items-center gap-1.5">
+                        <MapPin size={11} className="text-slate-500 flex-shrink-0" strokeWidth={2} />
+                        <input type="text" defaultValue={match.venue || ''} placeholder="Venue"
+                            onBlur={e => actions.updateMatchDetails(team.id, { venue: e.target.value })}
+                            className="flex-1 bg-transparent text-slate-200 placeholder-slate-600 text-xs font-medium px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400" />
                     </div>
 
-                    {/* Arrive */}
-                    <div className="flex items-baseline gap-2">
+                    {/* Date · Time · Arrive — all on one row */}
+                    <div className="flex items-baseline gap-2 flex-wrap">
+                        {/* Hidden native date input; show formatted label */}
+                        <div className="relative flex items-baseline gap-1 flex-none">
+                            {matchDateLabel
+                                ? <span className="text-slate-300 text-xs font-medium">{matchDateLabel}</span>
+                                : <span className="text-slate-600 text-xs">Date</span>
+                            }
+                            <input type="date" defaultValue={match.match_date || ''}
+                                onBlur={e => actions.updateMatchDetails(team.id, { match_date: e.target.value })}
+                                className="absolute inset-0 opacity-0 w-full cursor-pointer"
+                                style={{ colorScheme: 'dark' }} />
+                        </div>
+                        <span className="text-slate-700 text-xs flex-none">·</span>
+                        <input type="text" defaultValue={match.time || ''} placeholder="Time"
+                            onBlur={e => actions.updateMatchDetails(team.id, { time: e.target.value })}
+                            className="w-16 flex-none bg-transparent text-white placeholder-slate-600 text-sm font-semibold tabular-nums px-0 py-0.5 border-0 border-b border-slate-600 focus:outline-none focus:border-yellow-400" />
                         <span className="text-slate-600 text-xs flex-none">arr</span>
                         <input type="text" defaultValue={match.arrive_at || ''} placeholder="–"
                             onBlur={e => actions.updateMatchDetails(team.id, { arrive_at: e.target.value })}
-                            className="w-14 flex-none bg-transparent text-slate-400 placeholder-slate-700 text-xs px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400" />
+                            className="w-12 flex-none bg-transparent text-slate-400 placeholder-slate-700 text-xs px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400" />
                     </div>
 
-                    {/* Opponent */}
-                    <input
-                        type="text"
-                        defaultValue={match.opponent || ''}
-                        placeholder="vs"
-                        onBlur={e => {
-                            const opponent = e.target.value
-                            const updates = { opponent }
-                            const isHomeGame = match.is_home ?? match.venue?.toLowerCase().includes('mentone') ?? false
-                            const { shirt, socks } = isHomeGame ? { shirt: false, socks: false } : checkClash(opponent)
-                            const currentTop   = (match.top_colour   || 'blue').toLowerCase()
-                            const currentSocks = (match.socks_colour || 'yellow').toLowerCase()
-                            if (currentTop === 'blue' || currentTop === 'white')
-                                updates.top_colour = shirt ? 'White' : 'Blue'
-                            if (currentSocks === 'yellow' || currentSocks === 'blue')
-                                updates.socks_colour = socks ? 'Blue' : 'Yellow'
-                            actions.updateMatchDetails(team.id, updates)
-                        }}
-                        className="w-full bg-transparent text-slate-100 placeholder-slate-500 text-sm font-medium px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400"
-                    />
+                    {/* Opponent — clearly labelled */}
+                    <div className="flex items-baseline gap-1.5">
+                        <span className="text-slate-500 text-xs flex-none font-medium">vs</span>
+                        <input
+                            type="text"
+                            defaultValue={match.opponent || ''}
+                            placeholder="Opponent"
+                            onBlur={e => {
+                                const opponent = e.target.value
+                                const updates = { opponent }
+                                const isHomeGame = match.is_home ?? match.venue?.toLowerCase().includes('mentone') ?? false
+                                const { shirt, socks } = isHomeGame ? { shirt: false, socks: false } : checkClash(opponent)
+                                const currentTop   = (match.top_colour   || 'blue').toLowerCase()
+                                const currentSocks = (match.socks_colour || 'yellow').toLowerCase()
+                                if (currentTop === 'blue' || currentTop === 'white')
+                                    updates.top_colour = shirt ? 'White' : 'Blue'
+                                if (currentSocks === 'yellow' || currentSocks === 'blue')
+                                    updates.socks_colour = socks ? 'Blue' : 'Yellow'
+                                actions.updateMatchDetails(team.id, updates)
+                            }}
+                            className="flex-1 bg-transparent text-slate-100 placeholder-slate-500 text-sm font-semibold px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400"
+                        />
+                    </div>
 
-                    {/* Kit row — footnote level, separated by hairline */}
+                    {/* Kit row — label + colour select, clash icon inside button */}
                     <div className="flex items-center gap-2 pt-1 border-t border-slate-700/50">
-                        {Object.entries(KIT_COLOURS).map(([key, { options }]) => {
+                        {Object.entries(KIT_COLOURS).map(([key, { options, label }]) => {
                             const defaults = { top_colour: 'Blue', socks_colour: 'Yellow' }
                             const raw = match[key] || defaults[key]
                             const val = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase()
                             const isClash = (key === 'top_colour' && clash.shirt) ||
                                             (key === 'socks_colour' && clash.socks)
+                            const kitHex = kitColourMap[val.toLowerCase()] || '#64748b'
                             return (
                                 <div key={key} className="relative flex-1">
                                     <select
                                         value={val}
                                         onChange={e => actions.updateMatchDetails(team.id, { [key]: e.target.value })}
-                                        className={`w-full text-xs rounded px-2 py-1 text-center
-                                                   appearance-none cursor-pointer focus:outline-none
-                                                   bg-transparent border transition-colors
-                                                   ${isClash
-                                                     ? 'border-amber-400 text-amber-300'
-                                                     : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
+                                        style={{ borderColor: isClash ? '#fbbf24' : kitHex, color: 'transparent' }}
+                                        className="w-full text-xs rounded px-2 py-1 appearance-none cursor-pointer focus:outline-none bg-transparent border transition-colors"
                                     >
                                         {options.map(o => (
                                             <option key={o} value={o}
                                                     style={{ background: '#1e293b', color: '#fff' }}>
-                                                {o}
+                                                {label} – {o}
                                             </option>
                                         ))}
                                     </select>
-                                    {isClash && (
-                                        <AlertTriangle
-                                            size={10}
-                                            className="absolute -top-1 -right-1 text-amber-400"
-                                            strokeWidth={2.5}
-                                        />
-                                    )}
+                                    {/* Overlay label — sole visible text, pointer-events-none so select still works */}
+                                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-1 text-xs">
+                                        {isClash && <AlertTriangle size={9} className="text-amber-400 flex-shrink-0" strokeWidth={2.5} />}
+                                        <span className={isClash ? 'text-amber-300' : 'text-slate-300'}>
+                                            {label} – {val}
+                                        </span>
+                                    </div>
                                 </div>
                             )
                         })}
@@ -235,14 +344,41 @@ export default function TeamColumn({
                                     {avail.icon}
                                 </button>
                                 <div className="flex-1 flex items-center gap-1.5 min-w-0">
-                                    <span className="truncate cursor-pointer hover:text-blue-600"
+                                    <span className="cursor-pointer hover:text-blue-600 leading-tight"
                                         onClick={() => onSelectPlayer && onSelectPlayer(allPlayers.find(p => p.id === sel.player_id) || { id: sel.player_id, name: sel.name })}>
                                         {sel.name}
                                     </span>
-                                    {roundUnavailability[sel.player_id]
-                                        ? <span className="w-2 h-2 rounded-full flex-shrink-0 bg-red-400" />
-                                        : <span className="w-2 h-2 rounded-full flex-shrink-0 bg-green-400" />}
-                                    {isDupe && <span className="text-xs bg-orange-100 text-orange-600 px-1 rounded font-bold flex-shrink-0">2×</span>}
+                                    {(() => {
+                                        const dot = getAvailDot(sel.player_id)
+                                        const cls = dot === 'red' ? 'bg-red-400' : dot === 'purple' ? 'bg-purple-400' : 'bg-green-400'
+                                        const tip = dot === 'red' ? 'Unavailable this day' : dot === 'purple' ? 'Available this day (unavailable other day)' : 'Available'
+                                        return <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cls}`} title={tip} />
+                                    })()}
+                                    {isDupe && <span className="text-xs bg-orange-100 text-orange-600 px-1 rounded font-bold flex-shrink-0">DU</span>}
+                                    {/* Note icon — lit up yellow if note exists */}
+                                    <div className="relative flex-shrink-0">
+                                        <button
+                                            ref={el => { if (el) el._selId = sel.id }}
+                                            onClick={e => setNoteOpenId(noteOpenId === sel.id ? null : sel.id)}
+                                            data-note-btn={sel.id}
+                                            title={sel.note || 'Add note'}
+                                            className={`flex items-center justify-center rounded transition-colors ${
+                                                sel.note
+                                                    ? 'text-yellow-500 hover:text-yellow-600'
+                                                    : 'text-slate-300 hover:text-slate-500'
+                                            }`}
+                                        >
+                                            <MessageSquare size={13} strokeWidth={2} />
+                                        </button>
+                                        {noteOpenId === sel.id && (
+                                            <NotePopover
+                                                sel={sel}
+                                                anchorRef={{ current: document.querySelector(`[data-note-btn="${sel.id}"]`) }}
+                                                onSave={(note) => actions.updateNote(sel.id, sel.player_id, note)}
+                                                onClose={() => setNoteOpenId(null)}
+                                            />
+                                        )}
+                                    </div>
                                 </div>
                                 {!sortMode && (
                                     <select value={sel.position || ''} onChange={(e) => actions.updatePosition(sel.player_id, e.target.value)}

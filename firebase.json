@@ -1,4 +1,12 @@
 {
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "runtime": "python312",
+      "ignore": ["venv", ".venv", "**/__pycache__/**"]
+    }
+  ],
   "hosting": [
     {
       "target": "prod",

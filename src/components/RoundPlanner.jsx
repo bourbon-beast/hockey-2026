@@ -19,7 +19,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
   const lastSeasonRound = useRef(null)
   const lastPracticeRound = useRef(null)
   const searchRef = useRef(null)
-  const [mobileTeamFilter, setMobileTeamFilter] = useState(null)
+  const [teamFilter, setTeamFilter] = useState(new Set())
   const [showOverflowMenu, setShowOverflowMenu] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
@@ -47,6 +47,15 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
   const [showTxtModal, setShowTxtModal] = useState(false)
   const [txtTeams, setTxtTeams] = useState([])
   const [unavailOpen, setUnavailOpen] = useState(false)
+  const [showSyncModal, setShowSyncModal] = useState(false)
+  const [syncLoading, setSyncLoading] = useState(false)
+  const [syncStaged, setSyncStaged] = useState(null)   // { staged, unmatched, new_count }
+  const [syncConfirming, setSyncConfirming] = useState(false)
+  const [syncAliases, setSyncAliases] = useState({})   // unmatched resolutions
+  const [columnCount, setColumnCount] = useState(() => {
+    const saved = localStorage.getItem('mhc-planner-columns')
+    return saved ? parseInt(saved) : 6
+  })
 
   // Remember last viewed round per mode so switching back restores position
   useEffect(() => {
@@ -85,7 +94,19 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
         .filter(p => p.is_active !== 0)                                          // always hide inactive
         .filter(p => p.status_id !== 'not_returning')                            // always hide not returning
         .filter(p => !selected.has(p.id))
-        .filter(p => showUnavailableInPicker || !roundUnavailability[p.id])
+        .filter(p => {
+          const unavail = roundUnavailability[p.id]
+          if (!unavail) return true                          // fully available — always show
+          if (showUnavailableInPicker) return true           // user has toggled "show unavailable"
+          if (unavail === 'both') return false               // unavailable all weekend — hide
+          // Partial unavailability — check if the team's match day conflicts
+          const teamMatch = roundData?.matches?.find(m => m.team_id === pickerOpen?.teamId)
+          const matchDay = teamMatch?.match_date === currentRound?.sat_date ? 'sat'
+                         : teamMatch?.match_date === currentRound?.sun_date ? 'sun'
+                         : null
+          if (!matchDay) return false                        // no match date set — safe fallback, hide
+          return unavail !== matchDay                        // only show if unavail is the OTHER day
+        })
         .filter(p => !notInRoundFilter || !allSelectedInRound.has(p.id))
         .filter(p => {
           if (activeChips.size === 0) return true
@@ -152,7 +173,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
     const sheets = ['PL', 'PLR', 'PB', 'PC', 'PE', 'Metro'].map(tid => {
       const match = (roundData.matches || []).find(m => m.team_id === tid) || {}
       const players = (roundData.selections || []).filter(s => s.team_id === tid && !s.is_unavailable).sort((a, b) => a.slot_number - b.slot_number)
-      const canvas = buildTeamCanvas(tid, match, players, roundLabel)
+      const canvas = buildTeamCanvas(tid, match, players, roundLabel, duplicateIds)
       return { teamId: tid, dataUrl: canvas.toDataURL('image/png'), roundLabel }
     })
     setTeamSheetCanvases(sheets)
@@ -198,11 +219,19 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
   const prevSeason = seasonIdx > 0 ? seasonRounds[seasonIdx - 1] : null
   const nextSeason = seasonIdx >= 0 && seasonIdx < seasonRounds.length - 1 ? seasonRounds[seasonIdx + 1] : null
   const nextSeasonNum = seasonRounds.length > 0 ? Math.max(...seasonRounds.map(r => r.round_number)) + 1 : 1
-  const fmtShort = d => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : null
-  const satStr = fmtShort(currentRound?.sat_date)
-  const sunStr = fmtShort(currentRound?.sun_date)
+  const fmtDay = d => {
+    if (!d) return null
+    const dt = new Date(d + 'T00:00:00')
+    const dayName = dt.toLocaleDateString('en-AU', { weekday: 'short' })
+    const dayNum  = dt.toLocaleDateString('en-AU', { day: 'numeric' })
+    const mon     = dt.toLocaleDateString('en-AU', { month: 'short' })
+    return `${dayName} ${dayNum} ${mon}`
+  }
+  const satStr = fmtDay(currentRound?.sat_date)
+  const sunStr = fmtDay(currentRound?.sun_date)
   const dateStr = satStr && sunStr ? `${satStr} – ${sunStr}` : satStr || sunStr || null
-  const seasonLabel = currentRound ? `R${currentRound.round_number}${dateStr ? ` · ${dateStr}` : ''}` : 'No rounds'
+  const roundWord = currentRound ? `Round ${currentRound.round_number}` : 'No rounds'
+  const seasonLabel = currentRound ? `${roundWord}${dateStr ? `  ·  ${dateStr}` : ''}` : 'No rounds'
 
   // ── Shared ··· overflow menu ──────────────────────────────────────────────
   const MenuItem = ({ onClick, Icon, label, colour = 'text-slate-700', mobileHide = false }) => (
@@ -302,6 +331,60 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
     </div>
   )
 
+  // ── Unavailability Sync ───────────────────────────────────────────────────
+  const handleSyncUnavailability = async () => {
+    setSyncLoading(true)
+    setSyncStaged(null)
+    setSyncAliases({})
+    setShowSyncModal(true)
+    try {
+      const url = import.meta.env.VITE_SYNC_UNAVAIL_URL
+      const res = await fetch(url)
+      const data = await res.json()
+      if (data.ok) setSyncStaged(data)
+      else setSyncStaged({ error: data.error || 'Sync failed' })
+    } catch (e) {
+      setSyncStaged({ error: e.message })
+    }
+    setSyncLoading(false)
+  }
+
+  const handleConfirmSync = async () => {
+    if (!syncStaged?.staged) return
+    setSyncConfirming(true)
+    try {
+      // Include new matched entries + any unmatched that the user has resolved via the alias dropdown
+      const resolvedUnmatched = (syncStaged.unmatched || [])
+        .filter(u => syncAliases[u.sheet_name] && syncAliases[u.sheet_name] !== '')
+        .map(u => {
+          const player = allPlayers.find(p => p.name === syncAliases[u.sheet_name])
+          if (!player) return null
+          return { player_id: player.id, round_id: u.round_id, day: u.day, sheet_name: u.sheet_name }
+        })
+        .filter(Boolean)
+      const entries = [
+        ...syncStaged.staged.filter(s => s.is_new).map(s => ({
+          player_id: s.player_id, round_id: s.round_id, day: s.day, sheet_name: s.sheet_name
+        })),
+        ...resolvedUnmatched,
+      ]
+      const res = await fetch(import.meta.env.VITE_CONFIRM_UNAVAIL_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entries, aliases: syncAliases }),
+      })
+      const data = await res.json()
+      if (data.ok) {
+        setShowSyncModal(false)
+        setSyncStaged(null)
+        // Unavailability listener will auto-update the planner
+      }
+    } catch (e) {
+      console.error('Confirm sync failed', e)
+    }
+    setSyncConfirming(false)
+  }
+
   return (
       <div className="p-3 sm:p-4 space-y-3">
         {/* ── Navbar ── */}
@@ -311,9 +394,9 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
           {plannerMode === 'season' ? (
             <>
               <button onClick={() => prevSeason && actions.setCurrentRound(prevSeason)} disabled={!prevSeason} className="w-7 h-7 flex items-center justify-center rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-25 text-sm font-bold flex-shrink-0">‹</button>
-              <span className="text-sm font-semibold text-slate-800 truncate min-w-0">{seasonLabel}</span>
+              <span className="text-lg font-bold text-slate-800 truncate min-w-0">{seasonLabel}</span>
               {!nextSeason ? (
-                <button onClick={() => setShowAdvanceModal(true)} className="px-2.5 h-7 flex items-center rounded border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-semibold flex-shrink-0">R{nextSeasonNum} →</button>
+                <button onClick={() => setShowAdvanceModal(true)} className="px-2.5 h-7 flex items-center rounded border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-semibold flex-shrink-0">Round {nextSeasonNum} →</button>
               ) : (
                 <button onClick={() => actions.setCurrentRound(nextSeason)} className="w-7 h-7 flex items-center justify-center rounded border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 text-sm font-bold flex-shrink-0">›</button>
               )}
@@ -331,6 +414,31 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
             </>
           )}
           <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+            {/* Unavailability sync button — desktop only */}
+            {currentRound && (
+              <button
+                onClick={handleSyncUnavailability}
+                className="hidden sm:flex items-center gap-1.5 text-xs border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 bg-white rounded px-2.5 h-7 transition-colors font-medium"
+              >
+                <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-current"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+                Sync unavailability
+              </button>
+            )}
+            {/* Column count toggle — desktop only */}
+            <div className="hidden sm:flex items-center gap-1.5">
+              <span className="text-xs text-slate-400 font-medium">Teams</span>
+            <div className="flex items-center gap-0.5 border border-slate-200 rounded bg-white p-0.5">
+              {[3, 4, 5, 6].map(n => (
+                <button
+                  key={n}
+                  onClick={() => { setColumnCount(n); localStorage.setItem('mhc-planner-columns', n) }}
+                  className={`w-7 h-6 text-xs font-semibold rounded transition-colors ${columnCount === n ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-700'}`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+            </div>
             {overflowMenu}
           </div>
         </div>
@@ -342,7 +450,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
               <button onClick={() => prevSeason && actions.setCurrentRound(prevSeason)} disabled={!prevSeason} className="w-9 h-9 flex items-center justify-center rounded border border-slate-200 bg-white text-slate-500 disabled:opacity-25 text-base font-bold flex-shrink-0">‹</button>
               <span className="flex-1 text-sm font-bold text-slate-800 text-center truncate">{seasonLabel}</span>
               {!nextSeason ? (
-                <button onClick={() => setShowAdvanceModal(true)} className="px-2.5 h-9 flex items-center rounded border border-blue-300 bg-blue-50 text-blue-700 text-xs font-semibold flex-shrink-0">R{nextSeasonNum}→</button>
+                <button onClick={() => setShowAdvanceModal(true)} className="px-2.5 h-9 flex items-center rounded border border-blue-300 bg-blue-50 text-blue-700 text-xs font-semibold flex-shrink-0">Round {nextSeasonNum}→</button>
               ) : (
                 <button onClick={() => actions.setCurrentRound(nextSeason)} className="w-9 h-9 flex items-center justify-center rounded border border-slate-200 bg-white text-slate-500 text-base font-bold flex-shrink-0">›</button>
               )}
@@ -363,20 +471,16 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
           </div>
         </div>
 
-        {/* ── Round heading (desktop) ── */}
-        {currentRound && plannerMode === 'season' && (
-          <div className="hidden sm:flex items-baseline gap-3">
-            <h2 className="text-xl font-bold text-slate-800">Round {currentRound.round_number}</h2>
-            {dateStr && <span className="text-sm text-slate-400 font-medium">{dateStr}</span>}
-          </div>
-        )}
-
-        {/* ── Mobile Filter ── */}
+        {/* ── Team Filter ── */}
         {currentRound && (
-            <div className="flex items-center gap-1.5 overflow-x-auto sm:hidden pb-1" style={{ WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}>
-              <button onClick={() => setMobileTeamFilter(null)} className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-semibold border ${mobileTeamFilter === null ? 'bg-slate-800 text-white' : 'bg-white text-slate-600'}`}>All</button>
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1" style={{ WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}>
+              <button onClick={() => setTeamFilter(new Set())} className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${teamFilter.size === 0 ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200'}`}>All</button>
               {teams.map(t => (
-                  <button key={t.id} onClick={() => setMobileTeamFilter(prev => prev === t.id ? null : t.id)} className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-semibold border ${mobileTeamFilter === t.id ? 'bg-blue-900 text-white' : 'bg-white text-slate-600'}`}>{t.id}</button>
+                  <button key={t.id} onClick={() => setTeamFilter(prev => {
+                    const next = new Set(prev)
+                    next.has(t.id) ? next.delete(t.id) : next.add(t.id)
+                    return next
+                  })} className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${teamFilter.has(t.id) ? 'bg-blue-900 text-white border-blue-900' : 'bg-white text-slate-600 border-slate-200'}`}>{t.id}</button>
               ))}
             </div>
         )}
@@ -413,8 +517,12 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
 
         {/* ── Grid Columns (This is where TeamColumn is used!) ── */}
         {currentRound && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
-              {teams.filter(t => !mobileTeamFilter || t.id === mobileTeamFilter || window.innerWidth >= 640).map(team => (
+            <div
+              className="grid gap-3"
+              style={{ gridTemplateColumns: window.innerWidth < 640 ? '1fr' : `repeat(${columnCount}, minmax(0, 1fr))` }}
+              onDragOver={e => e.preventDefault()}
+            >
+              {teams.filter(t => teamFilter.size === 0 || teamFilter.has(t.id)).map(team => (
                   <TeamColumn
                       key={team.id}
                       team={team}
@@ -483,12 +591,23 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
                 <div className="overflow-y-auto flex-1">
                   {getAvailablePlayers().map(p => {
                     const isSelected = selectedPlayerIds.has(p.id)
-                    const isUnavail = !!roundUnavailability[p.id]
+                    const unavail = roundUnavailability[p.id]
+                    const teamMatch = roundData?.matches?.find(m => m.team_id === pickerOpen?.teamId)
+                    const matchDay = teamMatch?.match_date === currentRound?.sat_date ? 'sat'
+                                   : teamMatch?.match_date === currentRound?.sun_date ? 'sun'
+                                   : null
+                    const unavailStatus = !unavail ? null
+                                       : unavail === 'both' ? 'red'
+                                       : matchDay && unavail !== matchDay ? 'purple'
+                                       : 'red'
+                    const unavailLabel = unavailStatus === 'purple'
+                                       ? (unavail === 'sat' ? 'Sun only' : 'Sat only')
+                                       : unavailStatus === 'red' ? 'unavailable' : null
                     return (
-                        <div key={p.id} onClick={() => { const next = new Set(selectedPlayerIds); isSelected ? next.delete(p.id) : next.add(p.id); setSelectedPlayerIds(next) }} className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer border-b border-slate-100 text-sm ${isSelected ? 'bg-blue-50' : isUnavail ? 'bg-red-50 opacity-60' : 'hover:bg-slate-50'}`}>
+                        <div key={p.id} onClick={() => { const next = new Set(selectedPlayerIds); isSelected ? next.delete(p.id) : next.add(p.id); setSelectedPlayerIds(next) }} className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer border-b border-slate-100 text-sm ${isSelected ? 'bg-blue-50' : unavailStatus === 'red' ? 'bg-red-50 opacity-60' : unavailStatus === 'purple' ? 'bg-purple-50' : 'hover:bg-slate-50'}`}>
                           <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300'}`}>{isSelected && '✓'}</div>
-                          <span className={`flex-1 ${isUnavail ? 'line-through text-slate-400' : ''}`}>{p.name}</span>
-                          {isUnavail && <span className="text-xs text-red-400">unavailable</span>}
+                          <span className={`flex-1 ${unavailStatus === 'red' ? 'line-through text-slate-400' : ''}`}>{p.name}</span>
+                          {unavailLabel && <span className={`text-xs ${unavailStatus === 'purple' ? 'text-purple-500' : 'text-red-400'}`}>{unavailLabel}</span>}
                           {p.status_id && <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: getStatusColor(p.status_id) }} />}
                         </div>
                     )
@@ -692,6 +811,156 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
               </div>
             </div>
         )}
+
+        {/* ── Unavailability Sync Modal ── */}
+        {showSyncModal && (
+            <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
+
+                {/* Header */}
+                <div className="flex items-center justify-between px-5 py-4 border-b">
+                  <div>
+                    <h3 className="font-semibold text-slate-800">Unavailability Sync</h3>
+                    <p className="text-xs text-slate-400 mt-0.5">Review before importing</p>
+                  </div>
+                  <button onClick={() => setShowSyncModal(false)} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">×</button>
+                </div>
+
+                {/* Body */}
+                <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
+
+                  {/* Loading */}
+                  {syncLoading && (
+                    <div className="flex items-center justify-center py-12 gap-3 text-slate-500">
+                      <svg className="animate-spin w-5 h-5" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                      </svg>
+                      Reading sheet…
+                    </div>
+                  )}
+
+                  {/* Error */}
+                  {syncStaged?.error && (
+                    <div className="bg-red-50 border border-red-200 rounded px-4 py-3 text-sm text-red-700">
+                      {syncStaged.error}
+                    </div>
+                  )}
+
+                  {/* Results */}
+                  {syncStaged && !syncStaged.error && (
+                    <>
+                      {/* Summary bar */}
+                      <div className="flex items-center gap-3 text-sm">
+                        <span className="bg-green-100 text-green-700 px-2.5 py-1 rounded-full font-semibold">
+                          🆕 {syncStaged.new_count} new
+                        </span>
+                        <span className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">
+                          {syncStaged.total_count - syncStaged.new_count} already imported
+                        </span>
+                        {syncStaged.unmatched?.length > 0 && (
+                          <span className="bg-red-100 text-red-600 px-2.5 py-1 rounded-full">
+                            ⚠️ {syncStaged.unmatched.length} unmatched
+                          </span>
+                        )}
+                      </div>
+
+                      {/* New entries */}
+                      {syncStaged.staged?.filter(s => s.is_new).length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">New since last sync</p>
+                          <div className="border border-slate-200 rounded overflow-hidden">
+                            {syncStaged.staged.filter(s => s.is_new).map((s, i) => (
+                              <div key={i} className={`flex items-center gap-3 px-3 py-2 text-sm ${i > 0 ? 'border-t border-slate-100' : ''}`}>
+                                <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
+                                <span className="flex-1 font-medium text-slate-800">{s.player_name}</span>
+                                <span className="text-slate-400 text-xs">{s.round_label}</span>
+                                <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${s.day === 'both' ? 'bg-red-100 text-red-600' : s.day === 'sat' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+                                  {s.day === 'both' ? 'Both' : s.day === 'sat' ? 'Sat' : 'Sun'}
+                                </span>
+                                {s.confidence === 'fuzzy' && (
+                                  <span className="text-xs text-purple-500" title={`Sheet: "${s.fuzzy_from}"`}>~fuzzy</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Already imported — collapsed */}
+                      {syncStaged.staged?.filter(s => !s.is_new).length > 0 && (
+                        <details className="text-sm">
+                          <summary className="cursor-pointer text-xs font-semibold text-slate-400 uppercase tracking-wide">
+                            Already imported ({syncStaged.staged.filter(s => !s.is_new).length})
+                          </summary>
+                          <div className="mt-2 border border-slate-100 rounded overflow-hidden">
+                            {syncStaged.staged.filter(s => !s.is_new).map((s, i) => (
+                              <div key={i} className={`flex items-center gap-3 px-3 py-2 text-sm text-slate-400 ${i > 0 ? 'border-t border-slate-100' : ''}`}>
+                                <span className="w-2 h-2 rounded-full bg-slate-300 flex-shrink-0" />
+                                <span className="flex-1">{s.player_name}</span>
+                                <span className="text-xs">{s.round_label}</span>
+                                <span className="text-xs">{s.day}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      )}
+
+                      {/* Unmatched names */}
+                      {syncStaged.unmatched?.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-red-500 uppercase tracking-wide mb-2">⚠️ Unmatched names — link manually or skip</p>
+                          <div className="border border-red-200 rounded overflow-hidden">
+                            {syncStaged.unmatched.map((u, i) => (
+                              <div key={i} className={`flex items-center gap-3 px-3 py-2 text-sm ${i > 0 ? 'border-t border-red-100' : ''}`}>
+                                <span className="flex-1 text-red-500 font-medium">{u.sheet_name}</span>
+                                <span className="text-slate-400 text-xs">{u.date} {u.day}</span>
+                                <select
+                                  value={syncAliases[u.sheet_name] || ''}
+                                  onChange={e => setSyncAliases(prev => ({ ...prev, [u.sheet_name]: e.target.value }))}
+                                  className="text-xs border border-slate-200 rounded px-2 py-1 max-w-[140px]"
+                                >
+                                  <option value="">Skip</option>
+                                  {allPlayers.filter(p => p.is_active !== 0).sort((a,b) => a.name.localeCompare(b.name)).map(p => (
+                                    <option key={p.id} value={p.name}>{p.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {syncStaged.new_count === 0 && syncStaged.unmatched?.length === 0 && (
+                        <div className="text-center text-slate-500 text-sm py-6">
+                          ✅ All entries already imported — nothing new to add.
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {/* Footer */}
+                {syncStaged && !syncStaged.error && syncStaged.new_count > 0 && (
+                  <div className="px-5 py-4 border-t flex items-center justify-between gap-3">
+                    <span className="text-xs text-slate-400">{syncStaged.new_count} new entries will be imported</span>
+                    <div className="flex gap-2">
+                      <button onClick={() => setShowSyncModal(false)} className="px-4 py-2 text-sm text-slate-600 border rounded hover:bg-slate-50">Cancel</button>
+                      <button
+                        onClick={handleConfirmSync}
+                        disabled={syncConfirming}
+                        className="px-4 py-2 text-sm bg-blue-600 text-white rounded disabled:opacity-40 font-medium"
+                      >
+                        {syncConfirming ? 'Importing…' : `Import ${syncStaged.new_count} new`}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            </div>
+        )}
+
       </div>
   )
 }

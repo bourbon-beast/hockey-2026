@@ -57,7 +57,7 @@ const cRR = (ctx, x, y, w, h, r) => {
 
 const cCap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : ''
 
-export const buildTeamCanvas = (tid, match, players, roundLabel) => {
+export const buildTeamCanvas = (tid, match, players, roundLabel, duplicateIds = new Set()) => {
     const W = 480
     const PAD = 24
     const CLUB_H = 90
@@ -90,7 +90,7 @@ export const buildTeamCanvas = (tid, match, players, roundLabel) => {
     ctx.font = '13px system-ui, -apple-system, sans-serif'
     ctx.fillText('Team Sheet', PAD, 78)
 
-    // Team name bar
+    // Team name bar — no count badges
     const ty = CLUB_H
     ctx.fillStyle = '#1d4ed8'
     ctx.fillRect(0, ty, W, TEAM_H)
@@ -100,37 +100,6 @@ export const buildTeamCanvas = (tid, match, players, roundLabel) => {
     ctx.fillStyle = '#bfdbfe'
     ctx.font = '16px system-ui, -apple-system, sans-serif'
     ctx.fillText(TEAM_FULL_NAMES[tid] || '', PAD, ty + 56)
-
-    // Availability counts in header
-    const confirmedCount   = players.filter(p => Number(p.confirmed ?? 0) === 2).length
-    const waitingCount     = players.filter(p => Number(p.confirmed ?? 0) === 1).length
-    const unconfirmedCount = players.filter(p => Number(p.confirmed ?? 0) === 0).length
-    const unavailCount     = players.filter(p => Number(p.confirmed ?? 0) === 3).length
-
-    ctx.font = 'bold 11px system-ui, -apple-system, sans-serif'
-    let bx = W - PAD
-    const drawBadge = (label, bg, fg) => {
-        const bw = ctx.measureText(label).width + 12
-        bx -= bw + 4
-        cRR(ctx, bx, ty + 20, bw, 20, 10); ctx.fillStyle = bg; ctx.fill()
-        ctx.fillStyle = fg; ctx.font = 'bold 11px system-ui, -apple-system, sans-serif'
-        ctx.fillText(label, bx + 6, ty + 34)
-    }
-    if (unavailCount  > 0) drawBadge(`${unavailCount}✕`,  '#ef4444', '#ffffff')
-    if (waitingCount  > 0) drawBadge(`${waitingCount}?`,   '#facc15', '#1e293b')
-    if (unconfirmedCount > 0) drawBadge(`${unconfirmedCount}–`, '#94a3b8', '#ffffff')
-    if (confirmedCount > 0) drawBadge(`${confirmedCount}✓`, '#22c55e', '#ffffff')
-
-    // Player count badge
-    const countLabel = `${players.length} players`
-    ctx.font = 'bold 12px system-ui, -apple-system, sans-serif'
-    const cw = ctx.measureText(countLabel).width + 16
-    const badgeCol = players.length >= 11 && players.length <= 16 ? '#16a34a'
-        : players.length > 16 ? '#dc2626' : '#d97706'
-    ctx.fillStyle = badgeCol
-    cRR(ctx, W - PAD - cw, ty + 18, cw, 24, 12); ctx.fill()
-    ctx.fillStyle = '#ffffff'
-    ctx.fillText(countLabel, W - PAD - cw + 8, ty + 34)
 
     // Match info block
     const mi_y = CLUB_H + TEAM_H
@@ -149,8 +118,8 @@ export const buildTeamCanvas = (tid, match, players, roundLabel) => {
         const weekday = d.toLocaleDateString('en-AU', { weekday: 'long' })
         return `${weekday} ${day}${ord}`
     })()
-    const topCol = match.top_colour || 'blue'
-    const socksCol = match.socks_colour || 'yellow'
+    const topCol   = (match.top_colour   || 'blue').toLowerCase()
+    const socksCol = (match.socks_colour || 'yellow').toLowerCase()
 
     const infoLines = [
         { label: 'DATE',   value: dateStr },
@@ -193,33 +162,48 @@ export const buildTeamCanvas = (tid, match, players, roundLabel) => {
     players.forEach((p, i) => {
         const ry = pl_y + i * ROW_H
         const avail = Number(p.confirmed ?? 0)
-        const rowBg = avail === 0 || avail === 1
-            ? (i % 2 === 0 ? '#fefce8' : '#fef9c3')
-            : avail === 3
-                ? (i % 2 === 0 ? '#fff1f2' : '#ffe4e6')
-                : (i % 2 === 0 ? '#ffffff' : '#f8fafc')
+        const isDupe = duplicateIds.has(p.player_id ?? p.id)
+
+        // Row bg — only red tint for unavailable, clean white/grey otherwise
+        const rowBg = avail === 3
+            ? (i % 2 === 0 ? '#fff1f2' : '#ffe4e6')
+            : (i % 2 === 0 ? '#ffffff' : '#f8fafc')
         ctx.fillStyle = rowBg
         ctx.fillRect(0, ry, W, ROW_H)
 
-        if (avail === 0 || avail === 1) {
-            ctx.fillStyle = avail === 1 ? '#facc15' : '#d1d5db'
-            ctx.fillRect(0, ry, 4, ROW_H)
-        }
+        // Left accent bar — only for confirmed (green) or unavailable (red)
+        if (avail === 2) { ctx.fillStyle = '#22c55e'; ctx.fillRect(0, ry, 4, ROW_H) }
+        if (avail === 3) { ctx.fillStyle = '#ef4444'; ctx.fillRect(0, ry, 4, ROW_H) }
+
         if (i > 0) {
             ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1
             ctx.beginPath(); ctx.moveTo(PAD, ry); ctx.lineTo(W - PAD, ry); ctx.stroke()
         }
+
+        // Row number
         ctx.fillStyle = '#94a3b8'
         ctx.font = 'bold 13px system-ui, -apple-system, sans-serif'
         ctx.fillText(`${i + 1}`, PAD, ry + 27)
 
+        // Player name
         const isUnavail = avail === 3
-        const isUnconf  = avail === 0
-        const isWaiting = avail === 1
-        ctx.fillStyle = isUnavail ? '#94a3b8' : isUnconf ? '#78716c' : '#0f172a'
+        ctx.fillStyle = isUnavail ? '#94a3b8' : '#0f172a'
         ctx.font = `${isUnavail ? 'italic ' : ''}bold 19px system-ui, -apple-system, sans-serif`
-        const nameSuffix = isUnavail ? ' (unavailable)' : isWaiting ? ' ?' : isUnconf ? ' –' : ''
+        const nameSuffix = isUnavail ? ' (unavailable)' : ''
         ctx.fillText(p.name + nameSuffix, PAD + 34, ry + 27)
+
+        // DU badge
+        if (isDupe) {
+            const duLabel = 'DU'
+            ctx.font = 'bold 11px system-ui, -apple-system, sans-serif'
+            const duW = ctx.measureText(duLabel).width + 10
+            const duX = W - PAD - duW - 4
+            cRR(ctx, duX, ry + 10, duW, 18, 4)
+            ctx.fillStyle = '#ffedd5'; ctx.fill()
+            ctx.strokeStyle = '#fb923c'; ctx.lineWidth = 1; ctx.stroke()
+            ctx.fillStyle = '#c2410c'
+            ctx.fillText(duLabel, duX + 5, ry + 23)
+        }
     })
 
     if (players.length === 0) {

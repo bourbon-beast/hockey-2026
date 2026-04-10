@@ -2,22 +2,34 @@
 
 # Deploy script for MHC Squad Tracker (hockey-2026)
 # Usage:
-#   ./deploy.sh           → build + deploy to PROD (hosting + firestore rules)
-#   ./deploy.sh --uat     → build + deploy to UAT (hosting only)
-#   ./deploy.sh --rules   → deploy firestore rules to prod only
+#   ./deploy.sh              → build + deploy frontend to PROD
+#   ./deploy.sh --uat        → build + deploy frontend to UAT
+#   ./deploy.sh --all        → build + deploy frontend + functions to PROD
+#   ./deploy.sh --all --uat  → build + deploy frontend + functions to UAT
+#   ./deploy.sh --functions  → deploy both Cloud Functions to PROD
+#   ./deploy.sh --functions --uat  → deploy both Cloud Functions to UAT
+#   ./deploy.sh --fn syncHv  → deploy single function to PROD
+#   ./deploy.sh --fn syncHv --uat  → deploy single function to UAT
+#   ./deploy.sh --rules      → deploy Firestore rules to PROD only
 
 set -e
 
 ACCOUNT_EMAIL="steve.g.waters@gmail.com"
 DEPLOY_FRONTEND=true
 DEPLOY_RULES=true
+DEPLOY_FUNCTIONS=false
+SINGLE_FN=""
 UAT=false
 
 # Parse args
 for arg in "$@"; do
   case $arg in
-    --rules) DEPLOY_FRONTEND=false; DEPLOY_RULES=true ;;
-    --uat)   UAT=true; DEPLOY_RULES=false ;;
+    --all)       DEPLOY_FRONTEND=true; DEPLOY_FUNCTIONS=true; DEPLOY_RULES=false ;;
+    --rules)     DEPLOY_FRONTEND=false; DEPLOY_RULES=true ;;
+    --uat)       UAT=true; DEPLOY_RULES=false ;;
+    --functions) DEPLOY_FRONTEND=false; DEPLOY_RULES=false; DEPLOY_FUNCTIONS=true ;;
+    --fn)        DEPLOY_FRONTEND=false; DEPLOY_RULES=false; DEPLOY_FUNCTIONS=true ;;
+    syncHv|syncLadder|syncUnavailability|confirmUnavailabilitySync) SINGLE_FN=$arg ;;
   esac
 done
 
@@ -69,8 +81,29 @@ fi
 if [ "$DEPLOY_RULES" = true ]; then
   echo "🔒 Deploying Firestore rules (PROD)..."
   firebase deploy --only firestore:rules --project prod
-
   echo "✅ Firestore rules deployed."
+  echo ""
+fi
+
+# ── Cloud Functions ───────────────────────────────────────────────────
+if [ "$DEPLOY_FUNCTIONS" = true ]; then
+  if [ -n "$SINGLE_FN" ]; then
+    FN_TARGET="functions:$SINGLE_FN"
+    echo "⚡ Deploying function: $SINGLE_FN"
+  else
+    FN_TARGET="functions"
+    echo "⚡ Deploying all Cloud Functions..."
+  fi
+
+  if [ "$UAT" = true ]; then
+    echo "🧪 Target: UAT"
+    firebase deploy --only "$FN_TARGET" --project uat
+    echo "✅ Function(s) deployed to UAT."
+  else
+    echo "🚀 Target: PROD"
+    firebase deploy --only "$FN_TARGET" --project prod
+    echo "✅ Function(s) deployed to PROD."
+  fi
   echo ""
 fi
 

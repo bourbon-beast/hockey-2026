@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
+import { collection, onSnapshot } from 'firebase/firestore'
+import { db } from '../firebase'
 import {
-  getRounds, getPlayers, getUnavailability,
+  getRounds, getPlayers,
   addUnavailability, removeUnavailability, updateUnavailabilityDays
 } from '../db'
 
@@ -29,14 +31,24 @@ export default function UnavailabilityManager({ onSelectPlayer }) {
   const searchRef = useRef(null)
 
   useEffect(() => {
-    Promise.all([getRounds(), getPlayers(true), getUnavailability()]).then(([r, p, u]) => {
+    // Load rounds + players once (static data)
+    Promise.all([getRounds(), getPlayers(true)]).then(([r, p]) => {
       setRounds(r.filter(rd => rd.round_type === 'season'))
       setAllPlayers(p.filter(pl => pl.is_active === 1).sort((a, b) => a.name.localeCompare(b.name)))
-      const map = {}
-      u.forEach(rec => { map[`${rec.player_id}:${rec.round_id}`] = rec.days || 'both' })
-      setUnavailMap(map)
       setLoading(false)
     })
+
+    // Live listener on all playerUnavailability — updates instantly when
+    // PlayerModal or sync writes to Firestore
+    const unsub = onSnapshot(collection(db, 'playerUnavailability'), (snap) => {
+      const map = {}
+      snap.docs.forEach(d => {
+        const data = d.data()
+        map[`${data.playerId}:${data.roundId}`] = data.days || 'both'
+      })
+      setUnavailMap(map)
+    })
+    return () => unsub()
   }, [])
 
   useEffect(() => {
@@ -119,7 +131,7 @@ export default function UnavailabilityManager({ onSelectPlayer }) {
     const count = unavailEntries.length
 
     return (
-      <div className="flex-shrink-0 w-52 border border-slate-200 rounded-lg overflow-hidden bg-white">
+      <div className="w-full sm:flex-shrink-0 sm:w-52 border border-slate-200 rounded-lg overflow-hidden bg-white">
 
         {/* ── Fixed-height header ── */}
         <div className="bg-slate-800 text-white px-3 py-2">
@@ -142,7 +154,7 @@ export default function UnavailabilityManager({ onSelectPlayer }) {
           <span className="flex-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Name</span>
           <span className="w-8 text-center text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Sat</span>
           <span className="w-8 text-center text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Sun</span>
-          <span className="w-3" /> {/* spacer for × button */}
+          <span className="w-3" />
         </div>
 
         {/* ── Player rows ── */}
@@ -153,33 +165,25 @@ export default function UnavailabilityManager({ onSelectPlayer }) {
             return (
               <div key={player.id}
                 className="flex items-center gap-1 px-2 py-1.5 group hover:bg-slate-50 transition-colors">
-                {/* Name */}
                 <button
                   onClick={() => onSelectPlayer && onSelectPlayer(player)}
                   className="flex-1 text-xs font-medium text-slate-700 hover:text-blue-600 text-left truncate"
                   title={player.name}
-                >
-                  {player.name}
-                </button>
-                {/* Sat toggle */}
+                >{player.name}</button>
                 <button
                   onClick={() => toggleDay(player.id, rid, 'sat')}
                   className={`w-8 h-5 rounded text-[10px] font-bold border transition-colors ${
-                    hasSat
-                      ? 'bg-orange-400 border-orange-400 text-white'
-                      : 'bg-white border-slate-200 text-slate-300 hover:border-orange-300 hover:text-orange-400'
+                    hasSat ? 'bg-orange-400 border-orange-400 text-white'
+                           : 'bg-white border-slate-200 text-slate-300 hover:border-orange-300 hover:text-orange-400'
                   }`}
                 >Sat</button>
-                {/* Sun toggle */}
                 <button
                   onClick={() => toggleDay(player.id, rid, 'sun')}
                   className={`w-8 h-5 rounded text-[10px] font-bold border transition-colors ${
-                    hasSun
-                      ? 'bg-amber-400 border-amber-400 text-white'
-                      : 'bg-white border-slate-200 text-slate-300 hover:border-amber-300 hover:text-amber-400'
+                    hasSun ? 'bg-amber-400 border-amber-400 text-white'
+                           : 'bg-white border-slate-200 text-slate-300 hover:border-amber-300 hover:text-amber-400'
                   }`}
                 >Sun</button>
-                {/* Remove */}
                 <button
                   onClick={() => removeEntry(player.id, rid)}
                   className="w-3 text-slate-200 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 text-xs leading-none"
@@ -203,7 +207,7 @@ export default function UnavailabilityManager({ onSelectPlayer }) {
 
   // ── Round row ─────────────────────────────────────────────────────────────
   const RoundRow = ({ roundSet }) => (
-    <div className="flex gap-2 overflow-x-auto pb-1" style={{ WebkitOverflowScrolling: 'touch' }}>
+    <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2">
       {roundSet.map(r => <RoundColumn key={r.id} round={r} />)}
     </div>
   )

@@ -1,6 +1,12 @@
 # Dependencies
 node_modules/
 
+# Python virtualenv
+functions/venv/
+functions/.venv/
+__pycache__/
+*.pyc
+
 # Build output
 dist/
 

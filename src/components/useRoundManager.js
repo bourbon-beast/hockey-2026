@@ -1,5 +1,7 @@
 // useRoundManager.js
 import { useState, useEffect, useRef } from 'react'
+import { collection, onSnapshot, query, where } from 'firebase/firestore'
+import { db } from '../firebase'
 import * as DB from '../db'
 import { carryForwardSelections } from '../db'
 
@@ -17,6 +19,8 @@ export function useRoundManager() {
     const [dragOverInfo, setDragOverInfo] = useState(null)
     const touchDragRef = useRef(null)
     const touchScrollLocked = useRef(false)
+    const unsubscribeSelectionsRef = useRef(null)   // live listener cleanup
+    const unsubscribeUnavailRef    = useRef(null)   // live unavailability listener cleanup
 
     useEffect(() => {
         Promise.all([
@@ -36,19 +40,85 @@ export function useRoundManager() {
     }, [])
 
     useEffect(() => {
-        if (currentRound) {
-            DB.getRoundDetail(currentRound.id, allPlayers).then(setRoundData)
-            DB.getUnavailability({ round_id: currentRound.id })
-                .then(data => {
-                    const map = {}
-                    data.forEach(u => { map[Number(u.player_id)] = u.days || 'both' })
-                    setRoundUnavailability(map)
-                })
-        } else {
+        // Tear down any previous listener
+        if (unsubscribeSelectionsRef.current) {
+            unsubscribeSelectionsRef.current()
+            unsubscribeSelectionsRef.current = null
+        }
+        if (unsubscribeUnavailRef.current) {
+            unsubscribeUnavailRef.current()
+            unsubscribeUnavailRef.current = null
+        }
+
+        if (!currentRound) {
             setRoundData(null)
             setRoundUnavailability({})
+            return
         }
-    }, [currentRound, allPlayers])
+
+        // One-time fetch for match details (venue, time, opponent — not real-time)
+        DB.getRoundMatches(currentRound.id).then(matches => {
+            setRoundData(prev => prev ? { ...prev, matches } : { matches, selections: [], bench: [] })
+        })
+
+        // Live listener on playerUnavailability for this round
+        const unavailQuery = query(
+            collection(db, 'playerUnavailability'),
+            where('roundId', '==', String(currentRound.id))
+        )
+        unsubscribeUnavailRef.current = onSnapshot(unavailQuery, (snap) => {
+            const map = {}
+            snap.docs.forEach(d => {
+                const data = d.data()
+                map[Number(data.playerId)] = data.days || 'both'
+            })
+            setRoundUnavailability(map)
+        })
+
+        // Live listener on selections subcollection
+        const selectionsRef = collection(db, 'rounds', String(currentRound.id), 'selections')
+        const playerMap = {}
+        allPlayers.forEach(p => { playerMap[String(p.id)] = p })
+
+        unsubscribeSelectionsRef.current = onSnapshot(selectionsRef, (snap) => {
+            const selections = snap.docs.map(d => {
+                const sel = d.data()
+                const player = playerMap[sel.playerId] || {}
+                return {
+                    id: d.id,
+                    round_id: currentRound.id,
+                    team_id: sel.teamId,
+                    player_id: Number(sel.playerId) || sel.playerId,
+                    slot_number: sel.slotNumber,
+                    position: sel.position || null,
+                    confirmed: sel.confirmed ? (sel.confirmed === true ? 2 : sel.confirmed) : 0,
+                    is_unavailable: sel.isUnavailable ? 1 : 0,
+                    note: sel.note || null,
+                    name: player.name || 'Unknown',
+                    status_id: null,
+                    primary_team_id_2025: player.primaryTeam2025 || null,
+                    default_position: player.defaultPosition || null,
+                }
+            }).sort((a, b) => {
+                if (a.team_id !== b.team_id) return a.team_id.localeCompare(b.team_id)
+                return (a.slot_number || 0) - (b.slot_number || 0)
+            })
+
+            setRoundData(prev => prev ? { ...prev, selections } : { matches: [], selections, bench: [] })
+        })
+
+        // Cleanup on unmount or round change
+        return () => {
+            if (unsubscribeSelectionsRef.current) {
+                unsubscribeSelectionsRef.current()
+                unsubscribeSelectionsRef.current = null
+            }
+            if (unsubscribeUnavailRef.current) {
+                unsubscribeUnavailRef.current()
+                unsubscribeUnavailRef.current = null
+            }
+        }
+    }, [currentRound]) // eslint-disable-line react-hooks/exhaustive-deps
 
     const seasonRounds = rounds.filter(r => r.round_type === 'season')
     const practiceRounds = rounds.filter(r => r.round_type === 'practice')
@@ -204,11 +274,22 @@ export function useRoundManager() {
 
     const updatePosition = async (playerId, position) => {
         if (!currentRound) return
-        await DB.updateSelectionPosition(currentRound.id, playerId, position)
+        // Optimistic first — don't wait for Firestore round-trip
         setRoundData(prev => ({
             ...prev,
-            selections: prev.selections.map(s => s.player_id === playerId ? { ...s, position } : s)
+            selections: prev.selections.map(s => s.player_id === playerId ? { ...s, position: position || null } : s)
         }))
+        await DB.updateSelectionPosition(currentRound.id, playerId, position)
+    }
+
+    const updateNote = async (selectionId, playerId, note) => {
+        if (!currentRound) return
+        // Optimistic update
+        setRoundData(prev => ({
+            ...prev,
+            selections: prev.selections.map(s => s.id === selectionId ? { ...s, note } : s)
+        }))
+        await DB.updateSelectionNote(currentRound.id, selectionId, note)
     }
 
     // ── Drag & Drop Handlers ──
@@ -527,6 +608,7 @@ export function useRoundManager() {
         actions: {
             setCurrentRound, createRound, deleteRound, updateRound, carryForward, updateMatchDetails,
             addPlayers, removePlayer, markSelectionUnavailable, toggleConfirmed, updatePosition,
+            updateNote,
             handleDragStart, handleDragOverRow, handleDragOverEmpty, handleDragOverColumn,
             handleDropToBucket, handleDrop, handleDragEnd, handleTouchStart, handleTouchMove, handleTouchEnd,
             moveSelectionByIndex

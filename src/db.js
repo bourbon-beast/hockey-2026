@@ -242,6 +242,8 @@ export async function getRoundDetail(roundId, allPlayers = null) {
       status_id: null,
       primary_team_id_2025: player.primaryTeam2025 || null,
       default_position: player.defaultPosition || null,
+      // Round-scoped note stored on the selection doc itself
+      note: sel.note || null,
     }
   }).sort((a, b) => {
     if (a.team_id !== b.team_id) return a.team_id.localeCompare(b.team_id)
@@ -489,6 +491,13 @@ export async function updateSelectionPosition(roundId, playerId, position) {
   }
 }
 
+// Round-scoped note — stored directly on the selection document
+export async function updateSelectionNote(roundId, selectionId, note) {
+  await updateDoc(doc(db, 'rounds', String(roundId), 'selections', selectionId), {
+    note: note || null,
+  })
+}
+
 // Drag-and-drop: move player between teams or reorder within team
 export async function moveSelection(roundId, { playerId, from_team_id, target_team_id, target_player_id, insert_after }) {
   const selsSnap = await getDocs(collection(db, 'rounds', String(roundId), 'selections'))
@@ -714,4 +723,22 @@ export async function getHvSync() {
   const snap = await getDoc(doc(db, 'hvSync', 'latest'))
   if (!snap.exists()) return null
   return snap.data()
+}
+
+// ─── Weekly Digests ──────────────────────────────────────────────────────────
+
+// Returns all saved digests ordered newest-round first.
+// Each item: { id, roundNumber, generatedAt, html, text, summaries }
+export async function getDigestHistory() {
+  const snap = await getDocs(
+    query(collection(db, 'weeklyDigests'), orderBy('roundNumber', 'desc'))
+  )
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+}
+
+// Returns a single saved digest by round number, or null if not found.
+export async function getDigest(roundNumber) {
+  const snap = await getDoc(doc(db, 'weeklyDigests', `round_${roundNumber}`))
+  if (!snap.exists()) return null
+  return { id: snap.id, ...snap.data() }
 }
