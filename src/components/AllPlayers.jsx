@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { getPlayers, createPlayer } from '../db'
 
 // ── Add Player Modal ────────────────────────────────────────────────────────
@@ -139,20 +139,24 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
 
   useEffect(() => { loadPlayers() }, [refreshKey, showInactive])
 
-  const filtered = players
-    .filter(p => {
-      if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false
-      if (statusFilters.size > 0 && !statusFilters.has(p.status_id)) return false
-      return true
-    })
-    .sort((a, b) => {
-      let cmp = 0
-      if (sortBy === 'name')   cmp = a.name.localeCompare(b.name)
-      if (sortBy === 'team')   cmp = (a.primary_team_id_2025 || '').localeCompare(b.primary_team_id_2025 || '')
-      if (sortBy === 'games')  cmp = b.total_games_2025 - a.total_games_2025
-      if (sortBy === 'status') cmp = a.status_id.localeCompare(b.status_id)
-      return sortDir === 'asc' ? cmp : -cmp
-    })
+  // Memoize the filtered and sorted players list to prevent expensive array operations
+  // on every re-render (e.g. when typing in inputs or opening modals)
+  const filtered = useMemo(() => {
+    return players
+      .filter(p => {
+        if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false
+        if (statusFilters.size > 0 && !statusFilters.has(p.status_id)) return false
+        return true
+      })
+      .sort((a, b) => {
+        let cmp = 0
+        if (sortBy === 'name')   cmp = a.name.localeCompare(b.name)
+        if (sortBy === 'team')   cmp = (a.primary_team_id_2025 || '').localeCompare(b.primary_team_id_2025 || '')
+        if (sortBy === 'games')  cmp = b.total_games_2025 - a.total_games_2025
+        if (sortBy === 'status') cmp = a.status_id.localeCompare(b.status_id)
+        return sortDir === 'asc' ? cmp : -cmp
+      })
+  }, [players, search, statusFilters, sortBy, sortDir])
 
   const toggleSort = (col) => {
     if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -174,7 +178,10 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
     onRefresh?.()
   }
 
-  const inactiveCount = players.filter(p => p.is_active === 0).length
+  // Memoize inactive count calculation
+  const inactiveCount = useMemo(() => {
+    return players.filter(p => p.is_active === 0).length
+  }, [players])
 
   return (
     <div>
