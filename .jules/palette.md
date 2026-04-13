@@ -1,0 +1,3 @@
+## 2023-10-27 - Icon-Only Button Accessibility Pattern
+**Learning:** Found multiple instances across different components (`TeamColumn.jsx`, `UnavailabilityManager.jsx`) where icon-only "remove/delete" buttons (`<svg>` or `×` icons) lacked proper ARIA labels, title attributes, and clear focus states. This makes them inaccessible to screen readers and difficult to navigate via keyboard.
+**Action:** Always verify that every icon-only interactive element has an `aria-label` providing context, a `title` attribute for mouse users, and clear `focus-visible` outline or ring utility classes (`focus-visible:ring-2 focus-visible:outline-none`) combined with slight padding (`p-0.5` or `p-1`) to avoid cramped focus rings. Applied this consistently to fix accessibility issues.
