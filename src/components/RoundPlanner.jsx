@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useRoundManager } from './useRoundManager'
 import { buildTeamCanvas } from './roundUtils'
 import TeamColumn from './TeamColumn'
@@ -85,10 +85,23 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
   // Getters mapped
   const getStatusColor = (statusId) => statuses.find(s => s.id === statusId)?.color || '#6b7280'
   const duplicateIds = getters.getDuplicatePlayerIds()
-  const playerTeamMap = roundData ? Object.fromEntries(roundData.selections.map(s => [s.player_id, s.team_id])) : {}
 
-  const getAvailablePlayers = () => {
-    const selected = new Set(roundData?.selections.filter(s => s.team_id === pickerOpen?.teamId).map(s => s.player_id))
+  // ⚡ Bolt Optimization: Memoize the player team map to avoid recalculating the object map on every render.
+  // Impact: O(N) map creation is skipped if roundData hasn't changed.
+  const playerTeamMap = useMemo(() => {
+    return roundData ? Object.fromEntries(roundData.selections.map(s => [s.player_id, s.team_id])) : {}
+  }, [roundData])
+
+  const pickerOpenTeamId = pickerOpen?.teamId
+  const currentRoundSatDate = currentRound?.sat_date
+  const currentRoundSunDate = currentRound?.sun_date
+
+  // ⚡ Bolt Optimization: Memoize the available players list computation.
+  // Impact: Prevents re-running the expensive chain of multiple Array.filter() calls and sorts on `allPlayers`
+  // on every render, especially when the picker is open. We extract primitives from objects (like pickerOpenTeamId)
+  // to avoid unnecessary re-calculations when parent object references change.
+  const availablePlayers = useMemo(() => {
+    const selected = new Set(roundData?.selections.filter(s => s.team_id === pickerOpenTeamId).map(s => s.player_id))
     const allSelectedInRound = new Set(roundData?.selections.map(s => s.player_id))
     return allPlayers
         .filter(p => p.is_active !== 0)                                          // always hide inactive
@@ -100,9 +113,9 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
           if (showUnavailableInPicker) return true           // user has toggled "show unavailable"
           if (unavail === 'both') return false               // unavailable all weekend — hide
           // Partial unavailability — check if the team's match day conflicts
-          const teamMatch = roundData?.matches?.find(m => m.team_id === pickerOpen?.teamId)
-          const matchDay = teamMatch?.match_date === currentRound?.sat_date ? 'sat'
-                         : teamMatch?.match_date === currentRound?.sun_date ? 'sun'
+          const teamMatch = roundData?.matches?.find(m => m.team_id === pickerOpenTeamId)
+          const matchDay = teamMatch?.match_date === currentRoundSatDate ? 'sat'
+                         : teamMatch?.match_date === currentRoundSunDate ? 'sun'
                          : null
           if (!matchDay) return false                        // no match date set — safe fallback, hide
           return unavail !== matchDay                        // only show if unavail is the OTHER day
@@ -128,7 +141,20 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
           if (aU !== bU) return aU ? 1 : -1
           return a.name.localeCompare(b.name)
         })
-  }
+  }, [
+    allPlayers,
+    roundData,
+    roundUnavailability,
+    showUnavailableInPicker,
+    notInRoundFilter,
+    activeChips,
+    pickerTeamFilter,
+    searchTerm,
+    playerTeamMap,
+    pickerOpenTeamId,
+    currentRoundSatDate,
+    currentRoundSunDate
+  ])
 
   // Action Wrappers for Modals
   const handleCreateRound = async (copyFromPrevious = false, typeOverride = null) => {
@@ -589,7 +615,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
                   </div>
                 </div>
                 <div className="overflow-y-auto flex-1">
-                  {getAvailablePlayers().map(p => {
+                  {availablePlayers.map(p => {
                     const isSelected = selectedPlayerIds.has(p.id)
                     const unavail = roundUnavailability[p.id]
                     const teamMatch = roundData?.matches?.find(m => m.team_id === pickerOpen?.teamId)
