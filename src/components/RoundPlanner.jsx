@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useRoundManager } from './useRoundManager'
 import { buildTeamCanvas } from './roundUtils'
 import TeamColumn from './TeamColumn'
@@ -85,10 +85,12 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
   // Getters mapped
   const getStatusColor = (statusId) => statuses.find(s => s.id === statusId)?.color || '#6b7280'
   const duplicateIds = getters.getDuplicatePlayerIds()
-  const playerTeamMap = roundData ? Object.fromEntries(roundData.selections.map(s => [s.player_id, s.team_id])) : {}
+  const playerTeamMap = useMemo(() => roundData ? Object.fromEntries(roundData.selections.map(s => [s.player_id, s.team_id])) : {}, [roundData])
 
-  const getAvailablePlayers = () => {
-    const selected = new Set(roundData?.selections.filter(s => s.team_id === pickerOpen?.teamId).map(s => s.player_id))
+  // ⚡ Bolt: Memoize available players to prevent expensive O(N) recalculations on every render
+  const availablePlayers = useMemo(() => {
+    if (!pickerOpen) return []
+    const selected = new Set(roundData?.selections.filter(s => s.team_id === pickerOpen.teamId).map(s => s.player_id))
     const allSelectedInRound = new Set(roundData?.selections.map(s => s.player_id))
     return allPlayers
         .filter(p => p.is_active !== 0)                                          // always hide inactive
@@ -100,7 +102,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
           if (showUnavailableInPicker) return true           // user has toggled "show unavailable"
           if (unavail === 'both') return false               // unavailable all weekend — hide
           // Partial unavailability — check if the team's match day conflicts
-          const teamMatch = roundData?.matches?.find(m => m.team_id === pickerOpen?.teamId)
+          const teamMatch = roundData?.matches?.find(m => m.team_id === pickerOpen.teamId)
           const matchDay = teamMatch?.match_date === currentRound?.sat_date ? 'sat'
                          : teamMatch?.match_date === currentRound?.sun_date ? 'sun'
                          : null
@@ -128,7 +130,11 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
           if (aU !== bU) return aU ? 1 : -1
           return a.name.localeCompare(b.name)
         })
-  }
+  }, [
+    allPlayers, roundData, pickerOpen?.teamId, currentRound, roundUnavailability,
+    showUnavailableInPicker, notInRoundFilter, activeChips, pickerTeamFilter,
+    searchTerm, playerTeamMap
+  ])
 
   // Action Wrappers for Modals
   const handleCreateRound = async (copyFromPrevious = false, typeOverride = null) => {
@@ -589,7 +595,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
                   </div>
                 </div>
                 <div className="overflow-y-auto flex-1">
-                  {getAvailablePlayers().map(p => {
+                  {availablePlayers.map(p => {
                     const isSelected = selectedPlayerIds.has(p.id)
                     const unavail = roundUnavailability[p.id]
                     const teamMatch = roundData?.matches?.find(m => m.team_id === pickerOpen?.teamId)
