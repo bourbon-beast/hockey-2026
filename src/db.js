@@ -3,7 +3,7 @@
 import { db } from './firebase'
 import {
   collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
-  addDoc, query, where, orderBy, writeBatch, deleteField, arrayUnion, arrayRemove, increment
+  addDoc, query, where, orderBy, writeBatch, deleteField, arrayUnion, arrayRemove
 } from 'firebase/firestore'
 import { getNextConfirmedState } from './utils.js'
 
@@ -54,6 +54,8 @@ export async function getPlayers(includeInactive = false) {
       playing_preference: data.playingPreference || null,
       teams_played_2026: data.teamsPlayed2026 || [],
       games_played_2026: data.gamesPlayed2026 || {},
+      total_games_2026:  data.totalGames2026 || 0,
+      stats_2026:        data.stats2026 || null,
     }
   })
   if (!includeInactive) players = players.filter(p => p.is_active === 1)
@@ -85,6 +87,8 @@ export async function getPlayer(playerId) {
     playing_preference: data.playingPreference || null,
     teams_played_2026: data.teamsPlayed2026 || [],
     games_played_2026: data.gamesPlayed2026 || {},
+    total_games_2026:  data.totalGames2026 || 0,
+    stats_2026:        data.stats2026 || null,
     history: [],
   }
 }
@@ -120,6 +124,34 @@ export async function createPlayer(data) {
     updatedAt: new Date().toISOString(),
   })
   return { id: Number(nextId), name: data.name }
+}
+
+// ─── HV Name Alias Management ────────────────────────────────────────────────
+
+// Returns { 'Richardson, Scott': '123', 'An, John': '45', ... }
+export async function getHvNameAliases() {
+  const snap = await getDoc(doc(db, 'config', 'hvNameAliases'))
+  return snap.exists() ? snap.data() : {}
+}
+
+// Save a single HV name → player ID resolution
+export async function saveHvAlias(hvName, playerId) {
+  await setDoc(doc(db, 'config', 'hvNameAliases'), { [hvName]: String(playerId) }, { merge: true })
+}
+
+// Returns list of HV names that couldn't be auto-matched on last sync
+export async function getHvUnmatchedNames() {
+  const snap = await getDoc(doc(db, 'config', 'hvUnmatchedNames'))
+  if (!snap.exists()) return []
+  return snap.data().names || []
+}
+
+// Clear a name from the unmatched list once resolved
+export async function resolveHvUnmatchedName(hvName) {
+  const snap = await getDoc(doc(db, 'config', 'hvUnmatchedNames'))
+  if (!snap.exists()) return
+  const names = (snap.data().names || []).filter(n => n !== hvName)
+  await setDoc(doc(db, 'config', 'hvUnmatchedNames'), { names, updatedAt: new Date().toISOString() }, { merge: true })
 }
 
 export async function removeTeamPlayed(playerId, teamId) {
@@ -397,10 +429,10 @@ export async function addSelectionBatch(roundId, players) {
       isUnavailable: false,
     })
     ids.push(ref.id)
-    // Atomically add team to player's teamsPlayed2026 array and increment game count
+    // Track which teams a player has been selected for (for picker filter)
+    // Note: gamesPlayed2026 counts are only updated by syncHv (actual attendance)
     batch.update(doc(db, 'players', String(player_id)), {
       teamsPlayed2026: arrayUnion(team_id),
-      [`gamesPlayed2026.${team_id}`]: increment(1),
       updatedAt: new Date().toISOString(),
     })
   }
@@ -419,10 +451,10 @@ export async function addSelection(roundId, { team_id, player_id, slot_number })
     confirmed: false,
     isUnavailable: false,
   })
-  // Keep teamsPlayed2026 and gamesPlayed2026 in sync
+  // Keep teamsPlayed2026 in sync (for picker filter)
+  // Note: gamesPlayed2026 counts only updated by syncHv (actual attendance)
   batch.update(doc(db, 'players', String(player_id)), {
     teamsPlayed2026: arrayUnion(team_id),
-    [`gamesPlayed2026.${team_id}`]: increment(1),
     updatedAt: new Date().toISOString(),
   })
   await batch.commit()
@@ -444,10 +476,7 @@ export async function removeSelection(roundId, teamId, playerId) {
       .sort((a, b) => (a.data().slotNumber || 0) - (b.data().slotNumber || 0))
     const batch = writeBatch(db)
     remaining.forEach((d, i) => batch.update(d.ref, { slotNumber: i + 1 }))
-    batch.update(doc(db, 'players', String(playerId)), {
-      [`gamesPlayed2026.${teamId}`]: increment(-1),
-      updatedAt: new Date().toISOString(),
-    })
+    // Note: gamesPlayed2026 is not decremented here — counts come from syncHv only
     await batch.commit()
   }
 }
@@ -482,10 +511,12 @@ export async function toggleSelectionConfirmed(roundId, teamId, playerId) {
   return 0
 }
 
-export async function updateSelectionPosition(roundId, playerId, position) {
-  // Position update finds by playerId across all teams in the round
+export async function updateSelectionPosition(roundId, teamId, playerId, position) {
   const selsSnap = await getDocs(collection(db, 'rounds', String(roundId), 'selections'))
-  const target = selsSnap.docs.find(d => String(d.data().playerId) === String(playerId))
+  const target = selsSnap.docs.find(d => {
+    const data = d.data()
+    return data.teamId === teamId && String(data.playerId) === String(playerId)
+  })
   if (target) {
     await updateDoc(target.ref, { position: position || null })
   }
@@ -665,31 +696,28 @@ export async function carryForwardSelections(sourceRoundId, targetRoundId, teamI
 
 export async function getTeamPlayers(teamId) {
   const players = await getPlayers(true) // include inactive
-  const playerMap = Object.fromEntries(players.map(p => [String(p.id), p]))
 
-  // Pull all rounds, then all selections across every round for this team
-  const roundsSnap = await getDocs(collection(db, 'rounds'))
-  const roundIds = roundsSnap.docs.map(d => d.id)
-
-  const squadPlayerIds = new Set()
-  await Promise.all(roundIds.map(async (rid) => {
-    const selsSnap = await getDocs(collection(db, 'rounds', rid, 'selections'))
-    selsSnap.docs.forEach(d => {
-      if (d.data().teamId === teamId) {
-        squadPlayerIds.add(String(d.data().playerId))
-      }
-    })
-  }))
-
-  const squad2026 = [...squadPlayerIds]
-    .map(id => playerMap[id])
-    .filter(Boolean)
+  // Players actually confirmed as having played for this team (from syncHv attendance data)
+  const playedForTeam = players
+    .filter(p => (p.games_played_2026?.[teamId] || 0) > 0)
     .sort((a, b) => a.name.localeCompare(b.name))
+
+  // Players assigned to this team who haven't played yet (new to squad this season)
+  const assignedNotYetPlayed = players
+    .filter(p => p.assigned_team_id_2026 === teamId)
+    .filter(p => (p.games_played_2026?.[teamId] || 0) === 0)
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  // Combined squad: played first, then assigned-but-not-yet-played
+  const squad2026 = [
+    ...playedForTeam,
+    ...assignedNotYetPlayed,
+  ]
 
   // 2025 main squad — kept for reference column
   const mainSquad = players.filter(p => p.primary_team_id_2025 === teamId)
 
-  return { mainSquad, fillIns: [], squad2026 }
+  return { mainSquad, fillIns: [], squad2026, playedForTeam, assignedNotYetPlayed }
 }
 
 // ─── HV Fixture & Sync ───────────────────────────────────────────────────────
@@ -741,4 +769,32 @@ export async function getDigest(roundNumber) {
   const snap = await getDoc(doc(db, 'weeklyDigests', `round_${roundNumber}`))
   if (!snap.exists()) return null
   return { id: snap.id, ...snap.data() }
+}
+
+// ─── HV Stats — alias resolution helper ──────────────────────────────────────
+
+// After saving a new alias for an HV name, clear statsLastSync on any match docs
+// that have that name in their statsUnmatched array. This forces those matches to
+// be re-scraped on the next syncHv run so the new alias is applied.
+export async function clearStatsLastSyncForHvName(hvName) {
+  const roundsSnap = await getDocs(collection(db, 'rounds'))
+  const batch = writeBatch(db)
+  let cleared = 0
+
+  for (const roundDoc of roundsSnap.docs) {
+    if (roundDoc.data().roundType !== 'season') continue
+    const matchesSnap = await getDocs(
+      collection(db, 'rounds', roundDoc.id, 'matches')
+    )
+    for (const matchDoc of matchesSnap.docs) {
+      const unmatched = matchDoc.data().statsUnmatched || []
+      if (unmatched.includes(hvName)) {
+        batch.update(matchDoc.ref, { statsLastSync: deleteField() })
+        cleared++
+      }
+    }
+  }
+
+  if (cleared > 0) await batch.commit()
+  return cleared
 }

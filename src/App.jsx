@@ -1,12 +1,16 @@
 import { useState, useEffect } from 'react'
-import { ClipboardList, Calendar, UserX, Users, LayoutGrid, MoreHorizontal } from 'lucide-react'
+import { ClipboardList, Calendar, UserX, Users, LayoutGrid, MoreHorizontal, Settings } from 'lucide-react'
 import TeamView from './components/TeamView'
 import AllPlayers from './components/AllPlayers'
 import RoundPlanner from './components/RoundPlanner'
 import PlayerModal from './components/PlayerModal'
 import UnavailabilityManager from './components/UnavailabilityManager'
 import FixtureView from './components/FixtureView'
+import AdminView from './components/AdminView'
 import { getTeams, getStatuses } from './db'
+import { subscribeToAuth, signInWithGoogle, signOutUser } from './auth'
+
+const ADMIN_EMAIL = 'steve.g.waters@gmail.com'
 
 const NAV = [
   { id: 'round',   label: 'Planner',       Icon: ClipboardList },
@@ -14,6 +18,7 @@ const NAV = [
   { id: 'unavail', label: 'Availability',  Icon: UserX         },
   { id: 'team',    label: 'Teams',         Icon: LayoutGrid    },
   { id: 'players', label: 'Players',       Icon: Users         },
+  { id: 'admin',   label: 'Admin',         Icon: Settings, adminOnly: true },
 ]
 
 const MOBILE_TABS = ['round', 'fixture', 'unavail', 'team']
@@ -26,6 +31,10 @@ function App() {
   const [selectedPlayer, setSelectedPlayer] = useState(null)
   const [refreshKey, setRefreshKey]   = useState(0)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
+  const [user, setUser] = useState(null)
+  const isAdmin = user?.email === ADMIN_EMAIL
+
+  useEffect(() => subscribeToAuth(setUser), [])
 
   useEffect(() => {
     getTeams().then(setTeams)
@@ -42,9 +51,27 @@ function App() {
       {/* ── Desktop top nav ───────────────────────────────────────────── */}
       <nav className="hidden sm:block bg-white border-b border-gray-200 px-6 py-3">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-gray-800">MHC Squad Tracker</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-semibold text-gray-800">MHC Squad Tracker</h1>
+            {user ? (
+              <button
+                onClick={() => { if (confirm(`Sign out ${user.email}?`)) signOutUser() }}
+                title={user.email}
+                className={`w-7 h-7 rounded-full text-xs font-semibold text-white flex items-center justify-center ${isAdmin ? 'bg-blue-600' : 'bg-gray-400'}`}
+              >
+                {(user.displayName || user.email || '?').charAt(0).toUpperCase()}
+              </button>
+            ) : (
+              <button
+                onClick={() => signInWithGoogle().catch(e => console.error('Sign-in failed', e))}
+                className="text-xs font-medium text-gray-500 hover:text-blue-600 px-2 py-1 rounded border border-gray-200 hover:border-blue-300"
+              >
+                Admin
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-2">
-            {NAV.map(n => (
+            {NAV.filter(n => !n.adminOnly || isAdmin).map(n => (
               <button
                 key={n.id}
                 onClick={() => setView(n.id)}
@@ -76,10 +103,11 @@ function App() {
       {/* Main content — bottom padding on mobile to clear tab bar */}
       <main className="p-3 sm:p-6 pb-20 sm:pb-6">
         {view === 'players' && <AllPlayers statuses={statuses} teams={teams} onSelectPlayer={openPlayer} refreshKey={refreshKey} onRefresh={refresh} />}
-        {view === 'team'    && <TeamView teams={teams} statuses={statuses} selectedTeam={selectedTeam} onSelectTeam={setSelectedTeam} onSelectPlayer={openPlayer} refreshKey={refreshKey} onRefresh={refresh} />}
-        {view === 'round'   && <RoundPlanner statuses={statuses} onSelectPlayer={openPlayer} />}
+        {view === 'team'    && <TeamView teams={teams} statuses={statuses} selectedTeam={selectedTeam} onSelectTeam={setSelectedTeam} onSelectPlayer={openPlayer} refreshKey={refreshKey} onRefresh={refresh} isAdmin={isAdmin} />}
+        {view === 'round'   && <RoundPlanner statuses={statuses} onSelectPlayer={openPlayer} isAdmin={isAdmin} />}
         {view === 'unavail' && <UnavailabilityManager onSelectPlayer={openPlayer} />}
-        {view === 'fixture' && <FixtureView teams={teams} />}
+        {view === 'fixture' && <FixtureView teams={teams} isAdmin={isAdmin} />}
+        {view === 'admin'   && isAdmin && <AdminView />}
       </main>
 
       {/* ── Mobile bottom tab bar ─────────────────────────────────────── */}
@@ -120,7 +148,7 @@ function App() {
             className="absolute bottom-16 right-0 left-0 bg-white border-t border-gray-200 shadow-lg"
             onClick={e => e.stopPropagation()}
           >
-            {NAV.filter(n => !MOBILE_TABS.includes(n.id)).map(n => (
+            {NAV.filter(n => !MOBILE_TABS.includes(n.id) && (!n.adminOnly || isAdmin)).map(n => (
               <button
                 key={n.id}
                 onClick={() => { setView(n.id); setShowMoreMenu(false) }}

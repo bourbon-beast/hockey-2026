@@ -36,3 +36,7 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+.env.production
+.env.uat
+hockey-2026-uat-firebase-adminsdk.json
+*.xlsx

@@ -1,46 +1,35 @@
-// src/auth.js — Firebase Auth helpers for magic link (passwordless email) sign-in
+// src/auth.js — Google Sign-In wrapper
+// Small surface: sign in, sign out, subscribe, and read the
+// Gmail OAuth access token (used later by the digest feature).
 import {
-  getAuth,
-  sendSignInLinkToEmail,
-  isSignInWithEmailLink,
-  signInWithEmailLink,
+  signInWithPopup,
   signOut,
   onAuthStateChanged,
+  GoogleAuthProvider,
 } from 'firebase/auth'
-import { app } from './firebase'
+import { auth, googleProvider } from './firebase'
 
-export const auth = getAuth(app)
+// Module-level cache for the Gmail access token.
+// Not persisted: lost on refresh (Firebase doesn't store OAuth
+// access tokens). We re-request via popup when we need it again.
+let gmailAccessToken = null
 
-const ACTION_CODE_SETTINGS = {
-  // After clicking the magic link, user lands back here
-  url: window.location.origin,
-  handleCodeInApp: true,
-}
-
-export async function sendMagicLink(email) {
-  await sendSignInLinkToEmail(auth, email, ACTION_CODE_SETTINGS)
-  // Store email so we can complete sign-in when user returns
-  window.localStorage.setItem('mhcSignInEmail', email)
-}
-
-export async function completeMagicLinkSignIn() {
-  if (!isSignInWithEmailLink(auth, window.location.href)) return null
-  let email = window.localStorage.getItem('mhcSignInEmail')
-  if (!email) {
-    // Fallback: ask user — handles case where link opened on different device
-    email = window.prompt('Please enter your email to confirm sign-in:')
-  }
-  const result = await signInWithEmailLink(auth, email, window.location.href)
-  window.localStorage.removeItem('mhcSignInEmail')
-  // Clean the URL so the link can't be reused
-  window.history.replaceState({}, document.title, window.location.pathname)
+export async function signInWithGoogle() {
+  const result = await signInWithPopup(auth, googleProvider)
+  const credential = GoogleAuthProvider.credentialFromResult(result)
+  gmailAccessToken = credential?.accessToken ?? null
   return result.user
 }
 
-export function signOutUser() {
-  return signOut(auth)
+export async function signOutUser() {
+  gmailAccessToken = null
+  await signOut(auth)
 }
 
-export function onAuthChange(callback) {
+export function subscribeToAuth(callback) {
   return onAuthStateChanged(auth, callback)
+}
+
+export function getGmailAccessToken() {
+  return gmailAccessToken
 }

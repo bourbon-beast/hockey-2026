@@ -148,8 +148,9 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
     .sort((a, b) => {
       let cmp = 0
       if (sortBy === 'name')   cmp = a.name.localeCompare(b.name)
-      if (sortBy === 'team')   cmp = (a.primary_team_id_2025 || '').localeCompare(b.primary_team_id_2025 || '')
-      if (sortBy === 'games')  cmp = b.total_games_2025 - a.total_games_2025
+      if (sortBy === 'team')   cmp = (a.assigned_team_id_2026 || '').localeCompare(b.assigned_team_id_2026 || '')
+      if (sortBy === 'games')  cmp = (b.total_games_2026 || 0) - (a.total_games_2026 || 0)
+      if (sortBy === 'goals')  cmp = (b.stats_2026?.goals || 0) - (a.stats_2026?.goals || 0)
       if (sortBy === 'status') cmp = a.status_id.localeCompare(b.status_id)
       return sortDir === 'asc' ? cmp : -cmp
     })
@@ -250,17 +251,20 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
               <SortHeader col="name">Name</SortHeader>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Type</th>
-              <SortHeader col="team">2025 Team</SortHeader>
-              <SortHeader col="games">Games</SortHeader>
-              <SortHeader col="status">Status</SortHeader>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">2026 Team</th>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Status</th>
+              <SortHeader col="team">2026 Team</SortHeader>
+              <SortHeader col="games">GP</SortHeader>
+              <SortHeader col="goals">Goals</SortHeader>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Cards</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {filtered.map(player => {
-              const status = statuses.find(s => s.id === player.status_id)
+              const status   = statuses.find(s => s.id === player.status_id)
               const isInactive = player.is_active === 0
+              const s26      = player.stats_2026
+              const gp       = player.total_games_2026 || 0
+              const hasCards = s26 && (s26.greenCards > 0 || s26.yellowCards > 0 || s26.redCards > 0)
               return (
                 <tr
                   key={player.id}
@@ -276,23 +280,23 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    {player.status_id === 'new' ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-cyan-100 text-cyan-700">
-                        New
-                      </span>
-                    ) : (
-                      <span className="text-xs text-gray-400">2025</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-gray-600">{player.primary_team_id_2025 || '—'}</td>
-                  <td className="px-4 py-3 text-gray-600">{player.total_games_2025 || 0}</td>
-                  <td className="px-4 py-3">
                     <span className="inline-flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: status?.color }} />
-                      <span className="text-gray-600">{status?.label}</span>
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: status?.color }} />
+                      <span className="text-xs text-gray-600">{status?.label}</span>
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{player.assigned_team_id_2026 || '—'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600">{player.assigned_team_id_2026 || '—'}</td>
+                  <td className="px-4 py-3 text-sm tabular-nums text-gray-700 font-medium">{gp > 0 ? gp : <span className="text-gray-300">—</span>}</td>
+                  <td className="px-4 py-3 text-sm tabular-nums text-gray-700">{s26?.goals > 0 ? s26.goals : <span className="text-gray-300">—</span>}</td>
+                  <td className="px-4 py-3">
+                    {hasCards ? (
+                      <span className="flex items-center gap-1">
+                        {s26.greenCards  > 0 && <span className="inline-flex items-center justify-center w-5 h-5 rounded text-white text-xs font-bold" style={{background:'#16a34a'}}>{s26.greenCards}</span>}
+                        {s26.yellowCards > 0 && <span className="inline-flex items-center justify-center w-5 h-5 rounded text-white text-xs font-bold" style={{background:'#ca8a04'}}>{s26.yellowCards}</span>}
+                        {s26.redCards    > 0 && <span className="inline-flex items-center justify-center w-5 h-5 rounded text-white text-xs font-bold" style={{background:'#dc2626'}}>{s26.redCards}</span>}
+                      </span>
+                    ) : <span className="text-gray-300">—</span>}
+                  </td>
                 </tr>
               )
             })}

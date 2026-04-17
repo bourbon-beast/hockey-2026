@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Clock, MapPin, ChevronDown, RefreshCw, Database, Copy, Check } from 'lucide-react'
 import { getRounds, getRoundMatches, getDigestHistory } from '../db'
+import { auth } from '../firebase'
 
 // ── Team display names ────────────────────────────────────────────────────────
 const TEAM_NAMES = {
@@ -10,6 +11,12 @@ const TEAM_NAMES = {
   PC:    'Pennant C',
   PE:    'Pennant E',
   Metro: 'Metro',
+}
+
+function formatOpponentLabel(match) {
+  if (!match?.opponent) return ''
+  const isHome = match?.is_home ?? match?.venue?.toLowerCase().includes('mentone') ?? false
+  return `${match.opponent} (${isHome ? 'Home' : 'Away'})`
 }
 
 // ── Format a single match as a fixture line ───────────────────────────────────
@@ -38,7 +45,7 @@ function formatFixtureLine(teamId, match) {
   // State Hockey Centre is a shared venue — show actual name even when is_home is true
   const isStateHC = venue.toLowerCase().includes('state')
   const loc     = (match.is_home && !isStateHC) ? 'Home' : (venue || '')
-  const parts   = [`vs ${match.opponent}`, loc ? `@ ${loc}` : ''].filter(Boolean).join(' ')
+  const parts   = [formatOpponentLabel(match), loc ? `@ ${loc}` : ''].filter(Boolean).join(' ')
   return `${name} – ${when ? `${when} ` : ''}${parts}`
 }
 
@@ -91,7 +98,6 @@ function ResultBadge({ result, scoreFor, scoreAgainst }) {
 function MatchCard({ team, match }) {
   const accent    = TEAM_ACCENT[team.id] || '#1e3a8a'
   const hasData   = !!match?.opponent
-  const isHome    = match?.is_home ?? match?.venue?.toLowerCase().includes('mentone') ?? false
   const hasResult = !!match?.result
   const [copied, setCopied] = useState(false)
 
@@ -125,12 +131,8 @@ function MatchCard({ team, match }) {
         ) : (
           <>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className={`text-xs font-semibold px-1.5 py-0.5 rounded
-                               ${isHome ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>
-                {isHome ? 'H' : 'A'}
-              </span>
               <span className="text-sm font-semibold text-slate-800 truncate">
-                vs {match.opponent}
+                {formatOpponentLabel(match)}
               </span>
               {hasResult && (
                 <ResultBadge result={match.result}
@@ -277,7 +279,7 @@ function FixturePanel({ teams }) {
       {loadingMatches ? (
         <div className="py-8 text-center text-sm text-slate-400">Loading matches…</div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           {teams.map(team => (
             <MatchCard key={team.id} team={team}
                        match={currentMatches?.find(m => m.team_id === team.id)} />
@@ -308,7 +310,7 @@ function FixturePanel({ teams }) {
 }
 
 // ── Digest panel ──────────────────────────────────────────────────────────────
-function DigestPanel() {
+function DigestPanel({ isAdmin }) {
   const [history, setHistory]         = useState([])
   const [selected, setSelected]       = useState(null)
   const [loadingHistory, setLoadingH] = useState(true)
@@ -318,7 +320,6 @@ function DigestPanel() {
 
   const SYNC_HV_URL     = import.meta.env.VITE_SYNC_HV_URL
   const SYNC_LADDER_URL = import.meta.env.VITE_SYNC_LADDER_URL
-  const SYNC_ENABLED    = import.meta.env.VITE_ENABLE_SYNC_BUTTONS === 'true'
 
   const loadHistory = () => {
     setLoadingH(true)
@@ -341,7 +342,11 @@ function DigestPanel() {
     setSyncing(type)
     setSyncResult(null)
     try {
-      const res  = await fetch(url, { method: 'POST' })
+      const idToken = await auth.currentUser?.getIdToken()
+      const res  = await fetch(url, {
+        method: 'POST',
+        headers: idToken ? { 'Authorization': `Bearer ${idToken}` } : {},
+      })
       const data = await res.json()
       setSyncResult({
         ok:    data.ok === true,
@@ -426,8 +431,8 @@ function DigestPanel() {
       </div>
 
       {/* Toolbar */}
-      {/* Sync buttons — UAT / admin only */}
-      {SYNC_ENABLED && (
+      {/* Sync buttons — admin only */}
+      {isAdmin && (
         <div className="flex items-center gap-2">
           <button
             onClick={() => runSync('hv')}
@@ -455,7 +460,7 @@ function DigestPanel() {
       )}
 
       {/* Sync result feedback */}
-      {SYNC_ENABLED && syncResult && (
+      {isAdmin && syncResult && (
         <div className={`text-xs font-medium px-3 py-1.5 rounded-lg text-center transition-all
                          ${syncResult.ok
                            ? 'bg-green-50 text-green-700 border border-green-200'
@@ -495,7 +500,7 @@ function DigestPanel() {
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
-export default function FixtureView({ teams }) {
+export default function FixtureView({ teams, isAdmin }) {
   // Mobile-only tab state — desktop always shows both
   const [mobileTab, setMobileTab] = useState('fixture')
 
@@ -545,7 +550,7 @@ export default function FixtureView({ teams }) {
             <h3 className="text-sm font-semibold text-slate-600">Weekly Digest</h3>
             <div className="flex-1 h-px bg-slate-200" />
           </div>
-          <DigestPanel />
+          <DigestPanel isAdmin={isAdmin} />
         </div>
 
       </div>

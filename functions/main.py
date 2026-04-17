@@ -35,19 +35,54 @@ from firebase_functions import https_fn
 
 REGION = 'australia-southeast1'
 
-# ── Simple API key auth ───────────────────────────────────────────────────────
-# Set via: firebase functions:secrets:set SYNC_API_KEY --project uat
-# Then add secrets=['SYNC_API_KEY'] to the decorator (see below).
-# For now we read from env — falls back to allowing all if not set (UAT only).
+# ── Firebase ID token auth ────────────────────────────────────────────────────
+# All sync functions require a valid Firebase ID token from an admin user.
+# Callers must send:  Authorization: Bearer <idToken>
+# Admin emails are stored in Firestore at config/admins  { emails: [...] }
 import os
+from firebase_admin import auth as fb_auth
 
-def _check_auth(req) -> bool:
-    """Returns True if request is authorised. Key passed as ?key= or X-Api-Key header."""
-    expected = os.environ.get('SYNC_API_KEY', '')
-    if not expected:
-        return True  # no key configured — open (UAT default)
-    provided = req.args.get('key') or req.headers.get('X-Api-Key', '')
-    return provided == expected
+def require_admin(req) -> tuple[bool, str]:
+    """
+    Verifies the Firebase ID token in the Authorization header and checks
+    that the caller's email is listed in config/admins.
+
+    Returns (True, '') on success, (False, reason_string) on failure.
+    Never raises — all exceptions are caught and returned as failure reasons.
+    """
+    auth_header = req.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return False, 'Missing or malformed Authorization header'
+
+    id_token = auth_header[len('Bearer '):]
+
+    # Ensure firebase_admin is initialised before verify_id_token
+    try:
+        db = _get_db()
+    except Exception as e:
+        return False, f'Error initialising Firebase: {e}'
+
+    try:
+        decoded = fb_auth.verify_id_token(id_token)
+    except Exception as e:
+        return False, f'Invalid ID token: {e}'
+
+    caller_email = decoded.get('email', '').lower().strip()
+    if not caller_email:
+        return False, 'Token has no email claim'
+
+    try:
+        admins_doc = db.collection('config').document('admins').get()
+        if not admins_doc.exists:
+            return False, 'config/admins document not found'
+        allowed = [e.lower().strip() for e in admins_doc.to_dict().get('emails', [])]
+    except Exception as e:
+        return False, f'Error reading config/admins: {e}'
+
+    if caller_email not in allowed:
+        return False, f'Email {caller_email} is not an admin'
+
+    return True, ''
 
 # ── Firebase app init (singleton — uses default service account in Cloud) ─────
 _app = None
@@ -100,9 +135,27 @@ def fetch_soup(url):
 
 
 def clean_opponent(raw):
-    """Strip HV competition prefix: 'Mens PL - 2026 Doncaster HC' → 'Doncaster HC'"""
+    """Strip HV competition prefix and common hockey club suffixes.
+
+    'Mens PL - 2026 Doncaster HC'              → 'Doncaster'
+    'Mens PL - 2026 Melbourne University Hockey Club' → 'Melbourne University'
+    'Mens PL - 2026 KBH Brumbies Hockey Club'  → 'KBH Brumbies'
+    """
     m = re.search(r' - 20\d\d (.+)$', raw)
-    return m.group(1).strip() if m else raw.strip()
+    name = m.group(1).strip() if m else raw.strip()
+
+    # Remove trailing hockey club suffixes (order matters — longest first)
+    suffixes = [
+        r'\s+Hockey Club$',
+        r'\s+Hockey Section$',
+        r'\s+Hockey Association$',
+        r'\s+Hockey$',
+        r'\s+HC$',
+    ]
+    for pattern in suffixes:
+        name = re.sub(pattern, '', name, flags=re.IGNORECASE).strip()
+
+    return name
 
 
 def parse_team_page(team_url):
@@ -190,36 +243,364 @@ def parse_team_page(team_url):
 
 
 def parse_scorers(game_url):
-    """Fetch game detail page, return Mentone scorer strings."""
+    """Fetch game detail page, return Mentone scorer strings (legacy — wraps parse_game_stats)."""
+    stats = parse_game_stats(game_url)
+    scorers = []
+    for p in stats:
+        if p['goals'] > 0:
+            name = _hv_name_to_display(p['hv_name'])
+            scorers.append(name if p['goals'] == 1 else f'{name} ({p["goals"]})')
+    return scorers
+
+
+def _hv_name_to_display(hv_name):
+    """Convert 'Richardson, Scott' → 'Scott Richardson' for display."""
+    nm = re.match(r'\d+\.\s*([^(#]+)', hv_name)
+    raw = nm.group(1).strip().rstrip(',').strip() if nm else hv_name.strip()
+    if ',' in raw:
+        parts = raw.split(',', 1)
+        return f'{parts[1].strip()} {parts[0].strip()}'
+    return raw
+
+
+def parse_game_stats(game_url):
+    """
+    Fetch HV game detail page, return per-player stats for Mentone players.
+
+    Each entry:
+      { hv_name, attended, goals, green_cards, yellow_cards, red_cards, gk, ets }
+
+    Columns on HV game page (after Name):
+      Goals | Green Card | Yellow Card | Red Card | GK | ETS
+    """
     try:
         soup = fetch_soup(game_url)
     except Exception:
         return []
+
     for h5 in soup.find_all('h5'):
-        if 'mentone' in h5.get_text(strip=True).lower():
-            table = h5.find_next('table')
-            if not table:
-                break
-            scorers = []
-            for row in table.find_all('tr')[1:]:
-                cells = row.find_all('td')
-                if len(cells) < 2:
-                    continue
-                name_raw  = cells[0].get_text(strip=True)
-                goals_raw = cells[1].get_text(strip=True)
-                if not (goals_raw and re.match(r'^\d+$', goals_raw)):
-                    continue
-                goals = int(goals_raw)
-                if goals < 1:
-                    continue
-                nm = re.match(r'\d+\.\s*([^(#]+)', name_raw)
-                if nm:
-                    raw = nm.group(1).strip().rstrip(',').strip()
-                    name = (f"{raw.split(',')[1].strip()} {raw.split(',')[0].strip()}"
-                            if ',' in raw else raw)
-                    scorers.append(name if goals == 1 else f'{name} ({goals})')
-            return scorers
+        if 'mentone' not in h5.get_text(strip=True).lower():
+            continue
+        table = h5.find_next('table')
+        if not table:
+            break
+
+        players = []
+        for row in table.find_all('tr')[1:]:
+            cells = row.find_all('td')
+            if len(cells) < 1:
+                continue
+
+            name_cell = cells[0]
+
+            # Skip rows without a player hyperlink — these are section headers,
+            # fill-in section headers ("Fill-ins"), totals rows, etc.
+            # Both regular squad members and fill-ins have /games/statistics/ links.
+            player_link = name_cell.find('a', href=lambda h: h and '/games/statistics/' in h)
+            if not player_link:
+                continue
+
+            # HV uses:
+            #   fa-check (or fa-check-square) = attended
+            #   fa-square text-light          = did NOT attend
+            # Fill-ins have no icon at all — they played, so treat as attended.
+            # Regular squad members with no icon are also treated as attended.
+            icon         = name_cell.find('i', class_=lambda c: c and 'fa-' in c)
+            icon_classes = icon.get('class', []) if icon else []
+            did_not_attend = (
+                'fa-square' in icon_classes and
+                ('text-light' in icon_classes or 'text-muted' in icon_classes)
+            )
+            attended = not did_not_attend
+
+            # Extract player name — squad players have "17. Richardson, Scott (#5)"
+            # fill-ins just have "Osborne, Matthew" with no number prefix
+            name_raw = name_cell.get_text(strip=True)
+            nm = re.match(r'^\d+\.\s*(.*?)(?:\s*\(#\d+\))?$', name_raw.strip())
+            if nm:
+                hv_name = nm.group(1).strip()
+            else:
+                # Fill-in: no number prefix, may or may not have (#N) suffix
+                hv_name = re.sub(r'\s*\(#\d+\)\s*$', '', name_raw).strip()
+
+            def _int(cells, idx):
+                if idx >= len(cells):
+                    return 0
+                v = cells[idx].get_text(strip=True)
+                try:
+                    return int(v)
+                except ValueError:
+                    return 0
+
+            players.append({
+                'hv_name':      hv_name,
+                'attended':     attended,
+                'goals':        _int(cells, 1),
+                'green_cards':  _int(cells, 2),
+                'yellow_cards': _int(cells, 3),
+                'red_cards':    _int(cells, 4),
+                'gk':           _int(cells, 5),
+                'ets':          _int(cells, 6),
+            })
+        return players
+
     return []
+
+
+# ── HV name alias helpers ─────────────────────────────────────────────────────
+
+def _load_hv_aliases(db):
+    """
+    Returns { 'Richardson, Scott': '123', 'An, John': '45', ... }
+    (HV name string → Firestore player doc ID as string)
+    Stored at config/hvNameAliases as a plain map.
+    """
+    snap = db.collection('config').document('hvNameAliases').get()
+    return snap.to_dict() if snap.exists else {}
+
+
+def _save_hv_alias(db, hv_name, player_id):
+    """Persist a single HV name → player ID mapping."""
+    db.collection('config').document('hvNameAliases').set(
+        {hv_name: str(player_id)}, merge=True
+    )
+
+
+def _match_hv_players(hv_stats, all_players, hv_aliases):
+    """
+    Resolve each HV player name to a Firestore player doc.
+
+    hv_stats     — list of dicts from parse_game_stats
+    all_players  — list of { id, name, ... } from Firestore players collection
+    hv_aliases   — { hv_name: player_id_str, ... }
+
+    Returns:
+      matched   — list of { ...stats, player_id }
+      unmatched — list of hv_name strings that could not be resolved
+    """
+    import difflib
+
+    # Build lookup: normalised display name → player
+    # Players stored as "First Last"; HV names come as "Last, First"
+    def _normalise(name):
+        return name.lower().strip()
+
+    player_map = {_normalise(p['name']): p for p in all_players}
+
+    matched   = []
+    unmatched = []
+
+    for stat in hv_stats:
+        hv_name = stat['hv_name']
+
+        # 1. Saved alias lookup (exact)
+        if hv_name in hv_aliases:
+            pid = hv_aliases[hv_name]
+            player = next((p for p in all_players if str(p['id']) == str(pid)), None)
+            if player:
+                matched.append({**stat, 'player_id': str(player['id'])})
+                continue
+
+        # 2. Convert "Last, First" → "First Last" and try exact match
+        if ',' in hv_name:
+            parts = hv_name.split(',', 1)
+            display = f'{parts[1].strip()} {parts[0].strip()}'
+        else:
+            display = hv_name
+
+        norm = _normalise(display)
+        if norm in player_map:
+            matched.append({**stat, 'player_id': str(player_map[norm]['id'])})
+            continue
+
+        # 3. Fuzzy match on display name
+        close = difflib.get_close_matches(norm, player_map.keys(), n=1, cutoff=0.78)
+        if close:
+            matched.append({**stat, 'player_id': str(player_map[close[0]]['id']),
+                             'fuzzy': True, 'fuzzy_matched_to': player_map[close[0]]['name']})
+            continue
+
+        unmatched.append(hv_name)
+
+    return matched, unmatched
+
+
+# ── Player stats sync ─────────────────────────────────────────────────────────
+
+def sync_player_stats(db, info):
+    """
+    1. For each played match doc that has hvGameUrl but no statsLastSync:
+       - Scrape parse_game_stats, store raw playerStats array on the match doc
+       - Mark statsLastSync timestamp
+    2. After scraping, recompute season totals from ALL stored playerStats
+       across all match docs and batch-write to players/{id}.
+
+    Returns list of unmatched HV names (for admin resolution UI).
+    """
+    info('Starting player stats sync...')
+
+    # Load all players and HV name aliases
+    all_players  = [{'id': d.id, **d.to_dict()} for d in db.collection('players').stream()]
+    hv_aliases   = _load_hv_aliases(db)
+    now_iso      = datetime.utcnow().isoformat() + 'Z'
+
+    # ── Phase 1: scrape any match docs missing statsLastSync ──────────────────
+    rounds_snap = db.collection('rounds').stream()
+    all_unmatched = []
+    scraped = 0
+
+    for round_doc in rounds_snap:
+        round_data = round_doc.to_dict()
+        if round_data.get('roundType') != 'season':
+            continue
+
+        matches_snap = db.collection('rounds').document(round_doc.id)\
+                         .collection('matches').stream()
+
+        for match_doc in matches_snap:
+            match_data = match_doc.to_dict()
+            hv_url     = match_data.get('hvGameUrl', '')
+            already    = match_data.get('statsLastSync')
+            has_stats  = bool(match_data.get('playerStats'))
+
+            # Only scrape played matches with a game URL not yet processed.
+            # Re-scrape if previously synced but got zero players (empty first run).
+            if not hv_url or (already and has_stats):
+                continue
+
+            team_id = match_doc.id
+            info(f'   Scraping stats: R{round_data.get("roundNumber")} {team_id} — {hv_url}')
+
+            try:
+                raw_stats = parse_game_stats(hv_url)
+            except Exception as e:
+                info(f'      Error scraping {hv_url}: {e}')
+                continue
+
+            # Resolve player IDs
+            matched, unmatched = _match_hv_players(raw_stats, all_players, hv_aliases)
+            all_unmatched.extend(unmatched)
+
+            if unmatched:
+                info(f'      Unmatched players: {unmatched}')
+
+            # Serialise for Firestore storage (only matched + attended players)
+            player_stats_to_store = [
+                {
+                    'playerId':    m['player_id'],
+                    'attended':    m['attended'],
+                    'goals':       m['goals'],
+                    'greenCards':  m['green_cards'],
+                    'yellowCards': m['yellow_cards'],
+                    'redCards':    m['red_cards'],
+                    'gk':          m['gk'],
+                    'ets':         m['ets'],
+                }
+                for m in matched
+            ]
+
+            # Write back to match doc
+            db.collection('rounds').document(round_doc.id)\
+              .collection('matches').document(team_id)\
+              .set({
+                  'playerStats':    player_stats_to_store,
+                  'statsLastSync':  now_iso,
+                  'statsUnmatched': unmatched,
+              }, merge=True)
+
+            scraped += 1
+            info(f'      ✅ Stored stats for {len(player_stats_to_store)} players '
+                 f'({len(unmatched)} unmatched)')
+
+    info(f'   Scraped {scraped} new match(es)')
+
+    # ── Phase 2: recompute totals from ALL stored playerStats ─────────────────
+    info('   🔢 Recomputing season totals from stored stats...')
+
+    # totals[player_id] = { goals, greenCards, yellowCards, redCards, gk, ets,
+    #                        gamesPerTeam: {PL: n, PLR: n, ...} }
+    totals = {}
+
+    rounds_snap2 = db.collection('rounds').stream()
+    for round_doc in rounds_snap2:
+        if round_doc.to_dict().get('roundType') != 'season':
+            continue
+
+        matches_snap2 = db.collection('rounds').document(round_doc.id)\
+                          .collection('matches').stream()
+
+        for match_doc in matches_snap2:
+            match_data  = match_doc.to_dict()
+            team_id     = match_doc.id
+            player_stats = match_data.get('playerStats', [])
+
+            for ps in player_stats:
+                if not ps.get('attended'):
+                    continue
+                pid = ps['playerId']
+                if pid not in totals:
+                    totals[pid] = {
+                        'goals': 0, 'greenCards': 0, 'yellowCards': 0,
+                        'redCards': 0, 'gk': 0, 'ets': 0,
+                        'gamesPerTeam': {},
+                    }
+                t = totals[pid]
+                t['goals']       += ps.get('goals', 0)
+                t['greenCards']  += ps.get('greenCards', 0)
+                t['yellowCards'] += ps.get('yellowCards', 0)
+                t['redCards']    += ps.get('redCards', 0)
+                t['gk']          += ps.get('gk', 0)
+                t['ets']         += ps.get('ets', 0)
+                t['gamesPerTeam'][team_id] = t['gamesPerTeam'].get(team_id, 0) + 1
+
+    info(f'   Writing totals for {len(totals)} player(s)...')
+
+    # Batch write player totals
+    batch = db.batch()
+    batch_count = 0
+
+    for player_id, t in totals.items():
+        games_per_team  = t.pop('gamesPerTeam')
+        teams_played    = [tid for tid, cnt in games_per_team.items() if cnt > 0]
+        total_games     = sum(games_per_team.values())
+
+        player_ref = db.collection('players').document(str(player_id))
+        batch.set(player_ref, {
+            'stats2026': {
+                'goals':       t['goals'],
+                'greenCards':  t['greenCards'],
+                'yellowCards': t['yellowCards'],
+                'redCards':    t['redCards'],
+                'gkAppearances': t['gk'],
+                'ets':         t['ets'],
+            },
+            'gamesPlayed2026':   games_per_team,
+            'teamsPlayed2026':   teams_played,
+            'totalGames2026':    total_games,
+            'statsUpdatedAt':    now_iso,
+        }, merge=True)
+        batch_count += 1
+
+        # Firestore batch limit is 500 writes
+        if batch_count >= 400:
+            batch.commit()
+            batch = db.batch()
+            batch_count = 0
+
+    if batch_count > 0:
+        batch.commit()
+
+    info(f'   ✅ Player stats written for {len(totals)} player(s)')
+
+    # Save unmatched names to config for admin UI
+    unique_unmatched = list(set(all_unmatched))
+    if unique_unmatched:
+        db.collection('config').document('hvUnmatchedNames').set(
+            {'names': unique_unmatched, 'updatedAt': now_iso}, merge=True
+        )
+        info(f'   ⚠️  Saved {len(unique_unmatched)} unmatched name(s) to config/hvUnmatchedNames')
+
+    return unique_unmatched
 
 # ══════════════════════════════════════════════════════════════════════════════
 # syncHv HELPERS
@@ -301,8 +682,12 @@ def _fmt_fixture_line(team_id, fix, html=False):
     day      = datetime.strptime(fix['date_str'], '%d %b %Y').strftime('%A') if fix.get('date_str') else ''
     time_fmt = _fmt_time(fix.get('time_str', ''))
     when     = ' '.join(filter(None, [day, time_fmt]))
-    venue    = (fix.get('venue') or '').replace('Hockey Centre', 'HC').replace('Playing Fields', 'Oval').replace('Secondary College', 'SC')
-    is_state = 'state' in venue.lower()
+    venue    = (fix.get('venue') or '')
+    # Shorten common venue suffixes
+    for pat in [r'\s+Hockey Club$', r'\s+Hockey Centre$', r'\s+Hockey$',
+                r'\s+Playing Fields$', r'\s+Secondary College$', r'\s+HC$']:
+        venue = re.sub(pat, '', venue, flags=re.IGNORECASE).strip()
+    is_state = 'state' in (fix.get('venue') or '').lower()
     loc      = venue if (not fix.get('is_home') or is_state) else 'Home'
     opp_part = f"vs {fix['opponent']}" if fix.get('opponent') else ''
     loc_part = f"@ {loc}" if loc else ''
@@ -312,7 +697,78 @@ def _fmt_fixture_line(team_id, fix, html=False):
     return f'{name} – {detail}'
 
 
-def format_text(summaries):
+def _build_leaders(db):
+    """
+    Read all active players from Firestore and return top-N season leaders.
+
+    Returns:
+      {
+        'scorers': [ {'name': 'Scott Richardson', 'goals': 9, 'team': 'PB'}, ... ],
+        'hackers': [ {'name': 'John Smith', 'total': 3,
+                      'green': 1, 'yellow': 2, 'red': 0, 'team': 'PL'}, ... ],
+      }
+    Only includes players with stats2026 set and at least 1 goal / 1 card respectively.
+    """
+    scorers = []
+    hackers = []
+    CARD_WEIGHTS = {'green': 1, 'yellow': 2, 'red': 3}
+
+    for doc in db.collection('players').stream():
+        d = doc.to_dict()
+        if not d.get('isActive', True):
+            continue
+        s = d.get('stats2026')
+        if not s:
+            continue
+
+        name   = d.get('name', '?')
+
+        goals = s.get('goals', 0)
+        if goals > 0:
+            scorers.append({'name': name, 'goals': goals})
+
+        green  = s.get('greenCards', 0)
+        yellow = s.get('yellowCards', 0)
+        red    = s.get('redCards', 0)
+        card_points = (
+            (green * CARD_WEIGHTS['green']) +
+            (yellow * CARD_WEIGHTS['yellow']) +
+            (red * CARD_WEIGHTS['red'])
+        )
+        total = green + yellow + red
+        if total > 0:
+            hackers.append({
+                'name': name,
+                'total': total,
+                'cardPoints': card_points,
+                'green': green, 'yellow': yellow, 'red': red,
+            })
+
+    scorers.sort(key=lambda x: x['goals'], reverse=True)
+    hackers.sort(
+        key=lambda x: (
+            -x['cardPoints'],  # weighted severity score
+            -x['yellow'],      # favor more yellows on ties
+            -x['red'],         # then reds
+            -x['green'],       # then greens
+            x['name'].lower()  # stable alphabetical final tie-break
+        )
+    )
+
+    def _top_n_with_ties(lst, key, n=5):
+        """Return top-n entries, extending to include all ties at the cut-off position."""
+        if not lst:
+            return []
+        cutoff = lst[n - 1][key] if len(lst) >= n else lst[-1][key]
+        return [p for p in lst if p[key] >= cutoff]
+
+    return {
+        'scorers': _top_n_with_ties(scorers, 'goals'),
+        'hackers': _top_n_with_ties(hackers, 'cardPoints'),
+    }
+
+
+def format_text(summaries, leaders=None):
     SEP = '------------------------------'
     today = date.today().strftime('%d %b %Y')
     lines = [
@@ -330,9 +786,8 @@ def format_text(summaries):
             continue
         score  = (str(r['score_mentone']) + '-' + str(r['score_opponent'])) if r['score_mentone'] is not None else '--'
         result = r['result'] or 'Not entered'
-        lines += ['\n' + s['name'] + ' | Round ' + str(r['round']),
-                  result + ' v ' + r['opponent'],
-                  'Score:  ' + score,
+        lines += ['\n' + s['name'] + ' | Round ' + str(r['round']) + ' | ' + result,
+                  'Versus: ' + r['opponent'] + '  ' + score,
                   'Goals:  ' + (', '.join(s.get('scorers', [])) or '--')]
 
     lines += ['', SEP, 'NEXT ROUND', SEP]
@@ -344,9 +799,35 @@ def format_text(summaries):
         if not f:
             continue
         lines.append(_fmt_fixture_line(s['team_id'], f))
+
+    # ── Season leaders ────────────────────────────────────────────────────────
+    if leaders and (leaders.get('scorers') or leaders.get('hackers')):
+        lines += ['', SEP, 'SEASON LEADERS', SEP]
+
+        if leaders.get('scorers'):
+            scorer_parts = []
+            for i, p in enumerate(leaders['scorers'], 1):
+                scorer_parts.append(f"{i}. {p['name']} — {p['goals']}")
+            lines.append('Top Scorers:')
+            lines += scorer_parts
+
+        if leaders.get('hackers'):
+            lines.append('')
+            hacker_parts = []
+            for i, p in enumerate(leaders['hackers'], 1):
+                card_detail = []
+                if p['green']:  card_detail.append(f"{p['green']}G")
+                if p['yellow']: card_detail.append(f"{p['yellow']}Y")
+                if p['red']:    card_detail.append(f"{p['red']}R")
+                hacker_parts.append(
+                    f"{i}. {p['name']} — {p['total']} ({', '.join(card_detail)})"
+                )
+            lines.append('Most Cards:')
+            lines += hacker_parts
+
     return '\n'.join(lines)
 
-def format_html(summaries):
+def format_html(summaries, leaders=None):
     today = date.today().strftime('%d %b %Y')
     S = {
         'wrap':    'font-family:Arial,sans-serif;font-size:14px;color:#1e293b;max-width:600px;',
@@ -361,6 +842,9 @@ def format_html(summaries):
         'badge_w': 'display:inline-block;padding:1px 7px;border-radius:3px;font-size:12px;font-weight:bold;color:#fff;background:#16a34a;',
         'badge_l': 'display:inline-block;padding:1px 7px;border-radius:3px;font-size:12px;font-weight:bold;color:#fff;background:#dc2626;',
         'badge_d': 'display:inline-block;padding:1px 7px;border-radius:3px;font-size:12px;font-weight:bold;color:#fff;background:#ca8a04;',
+        'card_g':  'display:inline-block;padding:0 5px;border-radius:3px;font-size:11px;font-weight:bold;color:#fff;background:#16a34a;',
+        'card_y':  'display:inline-block;padding:0 5px;border-radius:3px;font-size:11px;font-weight:bold;color:#fff;background:#ca8a04;',
+        'card_r':  'display:inline-block;padding:0 5px;border-radius:3px;font-size:11px;font-weight:bold;color:#fff;background:#dc2626;',
     }
 
     def badge(result):
@@ -400,7 +884,7 @@ def format_html(summaries):
             '<p style="%s">%s &nbsp;&middot;&nbsp; Round %s &nbsp;%s</p>'
             '<table style="border-collapse:collapse;">%s%s</table></div>'
             % (S['block'], S['comp'], s['name'], r['round'], badge(result),
-               row('Result:', '%s v %s' % (result, opp)),
+               row('Versus:', opp + ' &nbsp; ' + score),
                row('Goals:', goals))
         )
 
@@ -414,6 +898,54 @@ def format_html(summaries):
             '<p style="%s">Next Round &mdash; Round %s</p>' % (S['section'], next_round_num),
             '<div style="margin:0 0 8px 0;">%s</div>' % fixture_list,
         ]
+
+    # ── Season leaders ────────────────────────────────────────────────────────
+    if leaders and (leaders.get('scorers') or leaders.get('hackers')):
+        parts += [
+            '<hr style="%s">' % S['rule'],
+            '<p style="%s">Season Leaders</p>' % S['section'],
+        ]
+
+        # Top scorers table
+        if leaders.get('scorers'):
+            parts.append('<p style="font-size:12px;font-weight:bold;color:#475569;margin:0 0 4px 0;">Top Scorers</p>')
+            rows_html = ''
+            for i, p in enumerate(leaders['scorers'], 1):
+                bg = '#f8fafc' if i % 2 == 0 else '#ffffff'
+                rows_html += (
+                    f'<tr style="background:{bg};">'
+                    f'<td style="padding:3px 6px;color:#94a3b8;font-size:12px;width:18px;">{i}</td>'
+                    f'<td style="padding:3px 6px;font-weight:500;">{p["name"]}</td>'
+                    f'<td style="padding:3px 6px;font-weight:bold;text-align:right;">{p["goals"]}</td>'
+                    f'</tr>'
+                )
+            parts.append(
+                f'<table style="border-collapse:collapse;width:100%;margin-bottom:12px;">'
+                f'{rows_html}</table>'
+            )
+
+        # Top cards table
+        if leaders.get('hackers'):
+            parts.append('<p style="font-size:12px;font-weight:bold;color:#475569;margin:0 0 4px 0;">Most Cards</p>')
+            rows_html = ''
+            for i, p in enumerate(leaders['hackers'], 1):
+                bg = '#f8fafc' if i % 2 == 0 else '#ffffff'
+                card_badges = ''
+                if p['green']:  card_badges += f'<span style="{S["card_g"]}">G&nbsp;{p["green"]}</span> '
+                if p['yellow']: card_badges += f'<span style="{S["card_y"]}">Y&nbsp;{p["yellow"]}</span> '
+                if p['red']:    card_badges += f'<span style="{S["card_r"]}">R&nbsp;{p["red"]}</span>'
+                rows_html += (
+                    f'<tr style="background:{bg};">'
+                    f'<td style="padding:3px 6px;color:#94a3b8;font-size:12px;width:18px;">{i}</td>'
+                    f'<td style="padding:3px 6px;font-weight:500;">{p["name"]}</td>'
+                    f'<td style="padding:3px 6px;text-align:right;">{card_badges}</td>'
+                    f'</tr>'
+                )
+            parts.append(
+                f'<table style="border-collapse:collapse;width:100%;margin-bottom:8px;">'
+                f'{rows_html}</table>'
+            )
+
     parts.append('</div>')
     return '\n'.join(parts)
 
@@ -436,13 +968,18 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
         return https_fn.Response('', status=204, headers={
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, X-Api-Key',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         })
     cors_headers = {'Access-Control-Allow-Origin': '*'}
 
+    ok, reason = require_admin(req)
+    if not ok:
+        return https_fn.Response(
+            json.dumps({'error': reason}), status=401,
+            mimetype='application/json', headers=cors_headers
+        )
+
     db = _get_db()
-    if not _check_auth(req):
-        return https_fn.Response('Unauthorized', status=401, headers=cors_headers)
     now_iso = datetime.utcnow().isoformat() + 'Z'
     log = []
 
@@ -467,8 +1004,10 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
                                'last_result': None, 'next_fixture': None, 'scorers': []})
             continue
 
-        played   = [r for r in rounds if r['status'] == 'played']
-        upcoming = [r for r in rounds if r['status'] == 'upcoming']
+        played   = sorted([r for r in rounds if r['status'] == 'played'],
+                          key=lambda r: _parse_date(r.get('date_str')) or '')
+        upcoming = sorted([r for r in rounds if r['status'] == 'upcoming'],
+                          key=lambda r: _parse_date(r.get('date_str')) or '')
         last_result  = played[-1]  if played   else None
         next_fixture = upcoming[0] if upcoming else None
 
@@ -477,15 +1016,19 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
             info(f"   ⚽ Fetching scorers for R{last_result['round']}...")
             scorers = parse_scorers(last_result['detail_url'])
 
-        # Write result to match doc
-        if last_result:
-            doc_id = round_map.get(last_result['round'])
-            if doc_id:
-                write_result(db, doc_id, comp['team_id'], last_result, scorers)
-                info(f"   💾 Written result R{last_result['round']} {comp['team_id']}: "
-                     f"{last_result['result']} {last_result['score_mentone']}-{last_result['score_opponent']}")
-            else:
-                info(f"   ⚠️  R{last_result['round']} not in round map")
+        # Write results for ALL played rounds (not just last) so stats scraper
+        # has hvGameUrl available for every game, including older rounds.
+        # Scorers string is only populated for last_result (used in digest).
+        for game in played:
+            doc_id = round_map.get(game['round'])
+            if not doc_id:
+                info(f"   ⚠️  R{game['round']} not in round map — skipping")
+                continue
+            game_scorers = scorers if game is last_result else []
+            write_result(db, doc_id, comp['team_id'], game, game_scorers)
+            if game is last_result:
+                info(f"   💾 Written result R{game['round']} {comp['team_id']}: "
+                     f"{game['result']} {game['score_mentone']}-{game['score_opponent']}")
 
         # Update upcoming fixture details
         if next_fixture:
@@ -508,13 +1051,28 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
             out[key] = None if g is None else {k: v for k, v in g.items() if k != 'parsed_dt'}
         return out
 
-    text_output   = format_text(summaries)
-    html_output   = format_html(summaries)
+    # Build season leaders from updated player stats
+    try:
+        leaders = _build_leaders(db)
+        info(f"   🏆 Leaders: {len(leaders['scorers'])} scorers, {len(leaders['hackers'])} hackers")
+    except Exception as e:
+        info(f'⚠️  Leaders build failed: {e}')
+        leaders = None
+
+    text_output   = format_text(summaries, leaders)
+    html_output   = format_html(summaries, leaders)
     serial_output = [serialise(s) for s in summaries]
 
     # Determine upcoming round number — this digest's key
     next_round_nums = [s['next_fixture']['round'] for s in summaries if s.get('next_fixture')]
     digest_round    = next_round_nums[0] if next_round_nums else None
+
+    # Sync player stats (scrape new games + recompute totals)
+    try:
+        unmatched_names = sync_player_stats(db, info)
+    except Exception as e:
+        info(f'⚠️  Player stats sync failed: {e}')
+        unmatched_names = []
 
     # Always write hvSync/latest (keeps existing DigestPanel working)
     db.collection('hvSync').document('latest').set({
@@ -535,9 +1093,80 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
         info('⚠️  No upcoming round — weeklyDigests not written')
 
     return https_fn.Response(
-        json.dumps({'ok': True, 'digestRound': digest_round, 'log': log}),
+        json.dumps({'ok': True, 'digestRound': digest_round, 'log': log,
+                    'unmatchedHvNames': unmatched_names}),
         status=200, mimetype='application/json', headers=cors_headers
     )
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CLOUD FUNCTION 4: syncPlayerStats  (standalone — safe to call anytime)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@https_fn.on_request(region=REGION, timeout_sec=300, memory=512)
+def syncPlayerStats(req: https_fn.Request) -> https_fn.Response:
+    """
+    Scrapes stats for any newly played match docs, then recomputes season
+    totals per player from all stored match stats.
+
+    Can be called independently without triggering the full syncHv flow.
+    Also accepts POST body: { 'forceRescrape': true } to re-scrape all
+    match docs regardless of statsLastSync (use when fixing scraper bugs).
+    """
+    if req.method == 'OPTIONS':
+        return https_fn.Response('', status=204, headers={
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        })
+    cors_headers = {'Access-Control-Allow-Origin': '*'}
+
+    ok, reason = require_admin(req)
+    if not ok:
+        return https_fn.Response(
+            json.dumps({'error': reason}), status=401,
+            mimetype='application/json', headers=cors_headers
+        )
+
+    # Optional: force re-scrape of already-processed match docs
+    force = False
+    try:
+        body = req.get_json(silent=True) or {}
+        force = bool(body.get('forceRescrape', False))
+    except Exception:
+        pass
+
+    db  = _get_db()
+    log = []
+
+    def info(msg):
+        log.append(msg)
+        print(msg)
+
+    if force:
+        info('⚠️  forceRescrape=true — clearing statsLastSync from all match docs...')
+        rounds_snap = db.collection('rounds').stream()
+        batch = db.batch()
+        cleared = 0
+        for rd in rounds_snap:
+            if rd.to_dict().get('roundType') != 'season':
+                continue
+            for md in db.collection('rounds').document(rd.id).collection('matches').stream():
+                if md.to_dict().get('statsLastSync'):
+                    batch.update(md.reference, {'statsLastSync': None})
+                    cleared += 1
+                    if cleared % 400 == 0:
+                        batch.commit()
+                        batch = db.batch()
+        batch.commit()
+        info(f'   Cleared statsLastSync on {cleared} match doc(s)')
+
+    unmatched = sync_player_stats(db, info)
+
+    return https_fn.Response(
+        json.dumps({'ok': True, 'log': log, 'unmatchedHvNames': unmatched}),
+        status=200, mimetype='application/json', headers=cors_headers
+    )
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # syncLadder HELPERS
@@ -602,13 +1231,18 @@ def syncLadder(req: https_fn.Request) -> https_fn.Response:
         return https_fn.Response('', status=204, headers={
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, X-Api-Key',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         })
     cors_headers = {'Access-Control-Allow-Origin': '*'}
 
+    ok, reason = require_admin(req)
+    if not ok:
+        return https_fn.Response(
+            json.dumps({'error': reason}), status=401,
+            mimetype='application/json', headers=cors_headers
+        )
+
     db = _get_db()
-    if not _check_auth(req):
-        return https_fn.Response('Unauthorized', status=401, headers=cors_headers)
     now_iso = datetime.utcnow().isoformat() + 'Z'
     log     = []
 
@@ -849,12 +1483,16 @@ def syncUnavailability(req: https_fn.Request) -> https_fn.Response:
         return https_fn.Response('', status=204, headers={
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, X-Api-Key',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         })
     cors_headers = {'Access-Control-Allow-Origin': '*'}
 
-    if not _check_auth(req):
-        return https_fn.Response('Unauthorized', status=401, headers=cors_headers)
+    ok, reason = require_admin(req)
+    if not ok:
+        return https_fn.Response(
+            json.dumps({'error': reason}), status=401,
+            mimetype='application/json', headers=cors_headers
+        )
 
     db = _get_db()
     today_str = date.today().isoformat()
@@ -920,12 +1558,16 @@ def confirmUnavailabilitySync(req: https_fn.Request) -> https_fn.Response:
         return https_fn.Response('', status=204, headers={
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, X-Api-Key',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         })
     cors_headers = {'Access-Control-Allow-Origin': '*'}
 
-    if not _check_auth(req):
-        return https_fn.Response('Unauthorized', status=401, headers=cors_headers)
+    ok, reason = require_admin(req)
+    if not ok:
+        return https_fn.Response(
+            json.dumps({'error': reason}), status=401,
+            mimetype='application/json', headers=cors_headers
+        )
 
     body = req.get_json(silent=True) or {}
     entries = body.get('entries', [])
@@ -976,3 +1618,4 @@ def confirmUnavailabilitySync(req: https_fn.Request) -> https_fn.Response:
         json.dumps({'ok': True, 'written': written}),
         status=200, mimetype='application/json', headers=cors_headers
     )
+

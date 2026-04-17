@@ -2,12 +2,16 @@ import { useState, useRef, useEffect } from 'react'
 import { useRoundManager } from './useRoundManager'
 import { buildTeamCanvas } from './roundUtils'
 import TeamColumn from './TeamColumn'
+import { generateEmailHtml } from '../utils/generateEmailHtml'
+import { auth } from '../firebase'
+import VoteResults from './VoteResults'
+import { createVoteSession, getVoteSession } from '../db.votes'
 import {
   ChevronRight, ArrowLeftRight, Plus, Copy, Pencil, Trash2,
-  Image, FileText
+  Image, FileText, Mail, Vote
 } from 'lucide-react'
 
-export default function RoundPlanner({ statuses, onSelectPlayer }) {
+export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
   const { state, actions, getters } = useRoundManager()
   const {
     teams, allPlayers, currentRound, roundData, loading, roundUnavailability,
@@ -28,6 +32,11 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
   const [showUnavailableInPicker, setShowUnavailableInPicker] = useState(false)
   const [notInRoundFilter, setNotInRoundFilter] = useState(false)
   const [activeChips, setActiveChips] = useState(new Set(['playing']))
+  const [showQuickAddPlayer, setShowQuickAddPlayer] = useState(false)
+  const [quickAddName, setQuickAddName] = useState('')
+  const [quickAddNotes, setQuickAddNotes] = useState('')
+  const [quickAddSaving, setQuickAddSaving] = useState(false)
+  const [quickAddError, setQuickAddError] = useState('')
 
   // Modals Forms & States
   const [showNewRoundModal, setShowNewRoundModal] = useState(false)
@@ -46,7 +55,17 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
   const [teamSheetCanvases, setTeamSheetCanvases] = useState([])
   const [showTxtModal, setShowTxtModal] = useState(false)
   const [txtTeams, setTxtTeams] = useState([])
+  const [showEmailModal, setShowEmailModal] = useState(false)
+  const [emailHtml, setEmailHtml] = useState('')
+  const [emailSending, setEmailSending] = useState(false)
+  const [emailSent, setEmailSent] = useState(false)
+  const [emailError, setEmailError] = useState(null)
   const [unavailOpen, setUnavailOpen] = useState(false)
+  const [showVoteModal, setShowVoteModal] = useState(false)
+  const [voteTeam, setVoteTeam] = useState(null)          // teamId being set up
+  const [voteLink, setVoteLink] = useState(null)           // generated URL
+  const [voteCreating, setVoteCreating] = useState(false)
+  const [showVoteResults, setShowVoteResults] = useState(null) // { teamId }
   const [showSyncModal, setShowSyncModal] = useState(false)
   const [syncLoading, setSyncLoading] = useState(false)
   const [syncStaged, setSyncStaged] = useState(null)   // { staged, unmatched, new_count }
@@ -78,9 +97,40 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
     if (!pickerOpen) return
     setPickerTeamFilter(pickerOpen.teamId)
     setSelectedPlayerIds(new Set())
-    setNotInRoundFilter(false)
+    setNotInRoundFilter(true)
     setActiveChips(new Set(['playing']))
+    setShowQuickAddPlayer(false)
+    setQuickAddName('')
+    setQuickAddNotes('')
+    setQuickAddError('')
   }, [pickerOpen])
+
+  const handleQuickAddPlayer = async () => {
+    if (!pickerOpen?.teamId) return
+    if (!quickAddName.trim()) {
+      setQuickAddError('Name is required')
+      return
+    }
+    setQuickAddSaving(true)
+    setQuickAddError('')
+    try {
+      await actions.createAndAddPlayer(pickerOpen.teamId, {
+        name: quickAddName.trim(),
+        notes: quickAddNotes.trim() || null,
+        assigned_team_id_2026: pickerOpen.teamId,
+      })
+      setQuickAddName('')
+      setQuickAddNotes('')
+      setShowQuickAddPlayer(false)
+      setPickerOpen(null)
+      setSearchTerm('')
+      setSelectedPlayerIds(new Set())
+    } catch (e) {
+      setQuickAddError('Failed to create player')
+    } finally {
+      setQuickAddSaving(false)
+    }
+  }
 
   // Getters mapped
   const getStatusColor = (statusId) => statuses.find(s => s.id === statusId)?.color || '#6b7280'
@@ -180,6 +230,42 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
     setShowTeamSheetModal(true)
   }
 
+  const openEmailModal = () => {
+    if (!roundData || !currentRound) return
+    const html = generateEmailHtml(roundData, currentRound, teams, duplicateIds)
+    setEmailHtml(html)
+    setEmailSending(false)
+    setEmailSent(false)
+    setEmailError(null)
+    setShowEmailModal(true)
+  }
+
+  const sendToGmailDraft = async () => {
+    setEmailSending(true)
+    setEmailError(null)
+    try {
+      const roundLabel = currentRound?.round_type === 'season'
+        ? `Round ${currentRound.round_number}`
+        : currentRound?.name || 'Practice Match'
+      const fnUrl = import.meta.env.VITE_CREATE_GMAIL_DRAFT_URL
+      const res = await fetch(fnUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject: `MHC ${roundLabel} — Team Sheets`,
+          htmlBody: emailHtml,
+        }),
+      })
+      if (!res.ok) throw new Error(`Server error ${res.status}`)
+      setEmailSent(true)
+      setTimeout(() => setEmailSent(false), 4000)
+    } catch (err) {
+      setEmailError(`Failed to save draft: ${err.message}`)
+    } finally {
+      setEmailSending(false)
+    }
+  }
+
   const downloadTeamTxt = (teamId) => {
     if (!roundData || !currentRound) return
     const roundLabel = currentRound.round_type === 'season'
@@ -203,6 +289,31 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
       ? `R${currentRound.round_number}`
       : (currentRound.name || 'Practice').replace(/\s+/g, '-')
     teams.forEach((team, i) => setTimeout(() => downloadTeamTxt(team.id), i * 100))
+  }
+
+  const handleCreateVoteLink = async () => {
+    if (!currentRound || !voteTeam) return
+    setVoteCreating(true)
+    try {
+      const roundLabel = currentRound.round_type === 'season'
+        ? `Round ${currentRound.round_number}`
+        : currentRound.name || 'Practice Match'
+
+      // Check if session already exists
+      let session = await getVoteSession(currentRound.id, voteTeam)
+      if (!session) {
+        const players = (roundData?.selections || [])
+          .filter(s => s.team_id === voteTeam && !s.is_unavailable)
+          .sort((a, b) => a.slot_number - b.slot_number)
+          .map(s => ({ id: s.player_id, name: s.name }))
+        await createVoteSession(currentRound.id, voteTeam, { roundLabel, players })
+      }
+      const baseUrl = window.location.origin
+      setVoteLink(`${baseUrl}/vote/${currentRound.id}/${voteTeam}`)
+    } catch (e) {
+      console.error('Failed to create vote session', e)
+    }
+    setVoteCreating(false)
   }
 
   const downloadTeamSheet = (sheet) => {
@@ -271,10 +382,39 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
           )}
           {currentRound && (
             <MenuItem
+              onClick={() => { setShowOverflowMenu(false); openEmailModal() }}
+              Icon={Mail}
+              label="Email Digest"
+            />
+          )}
+          {currentRound && (
+            <MenuItem
               onClick={() => { setShowOverflowMenu(false); setTxtTeams(teams.map(t => t.id)); setShowTxtModal(true) }}
               Icon={FileText}
               label="Player Lists"
             />
+          )}
+
+          {/* ── Voting ── */}
+          {currentRound && isAdmin && (
+            <>
+              <div className="border-t border-slate-100 mt-1" />
+              <div className="px-4 pt-2 pb-1">
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Voting</span>
+              </div>
+              <MenuItem
+                onClick={() => { setShowOverflowMenu(false); setVoteTeam(null); setVoteLink(null); setShowVoteModal(true) }}
+                Icon={Vote}
+                label="Voting links"
+                colour="text-indigo-600"
+              />
+              <MenuItem
+                onClick={() => { setShowOverflowMenu(false); setShowVoteResults(true) }}
+                Icon={Vote}
+                label="Vote results"
+                colour="text-indigo-400"
+              />
+            </>
           )}
 
           {/* ── Rounds ── */}
@@ -338,8 +478,11 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
     setSyncAliases({})
     setShowSyncModal(true)
     try {
+      const idToken = await auth.currentUser?.getIdToken()
       const url = import.meta.env.VITE_SYNC_UNAVAIL_URL
-      const res = await fetch(url)
+      const res = await fetch(url, {
+        headers: idToken ? { 'Authorization': `Bearer ${idToken}` } : {},
+      })
       const data = await res.json()
       if (data.ok) setSyncStaged(data)
       else setSyncStaged({ error: data.error || 'Sync failed' })
@@ -368,9 +511,13 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
         })),
         ...resolvedUnmatched,
       ]
+      const idToken = await auth.currentUser?.getIdToken()
       const res = await fetch(import.meta.env.VITE_CONFIRM_UNAVAIL_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {}),
+        },
         body: JSON.stringify({ entries, aliases: syncAliases }),
       })
       const data = await res.json()
@@ -414,8 +561,8 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
             </>
           )}
           <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
-            {/* Unavailability sync button — desktop only */}
-            {currentRound && (
+            {/* Unavailability sync button — admin only, desktop only */}
+            {isAdmin && currentRound && (
               <button
                 onClick={handleSyncUnavailability}
                 className="hidden sm:flex items-center gap-1.5 text-xs border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 bg-white rounded px-2.5 h-7 transition-colors font-medium"
@@ -520,7 +667,32 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
             <div
               className="grid gap-3"
               style={{ gridTemplateColumns: window.innerWidth < 640 ? '1fr' : `repeat(${columnCount}, minmax(0, 1fr))` }}
-              onDragOver={e => e.preventDefault()}
+              onDragOver={e => {
+                // Delegate to the column under the cursor — critical for second-row columns
+                // where the drag can slip into the grid gap area between rows and bypass
+                // each column's own onDragOver, leaving dragOverInfo stale.
+                e.preventDefault()
+                const col = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-team-id]')
+                if (col) {
+                  const row = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-player-id]')
+                  if (row) {
+                    actions.handleDragOverRow(e, col.dataset.teamId, row.dataset.playerId)
+                  } else {
+                    actions.handleDragOverColumn(e, col.dataset.teamId)
+                  }
+                }
+              }}
+              onDrop={e => {
+                // Fallback drop handler — delegates to correct column/row using elementFromPoint
+                const col = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-team-id]')
+                if (col) {
+                  const row = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-player-id]')
+                  actions.handleDrop(e, col.dataset.teamId, row?.dataset.playerId ?? null)
+                } else {
+                  e.preventDefault()
+                  actions.handleDragEnd()
+                }
+              }}
             >
               {teams.filter(t => teamFilter.size === 0 || teamFilter.has(t.id)).map(team => (
                   <TeamColumn
@@ -616,12 +788,87 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
                 <div className="px-4 py-3 border-t border-slate-200 flex justify-between items-center">
                   <span className="text-xs text-slate-500">{selectedPlayerIds.size} selected</span>
                   <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        setShowQuickAddPlayer(true)
+                        setQuickAddError('')
+                        setQuickAddName('')
+                        setQuickAddNotes('')
+                      }}
+                      className="px-3 py-2 text-sm border border-slate-200 rounded text-slate-600 hover:border-blue-300 hover:text-blue-600"
+                    >
+                      + Add new player
+                    </button>
                     <button onClick={() => { setPickerOpen(null); setSearchTerm(''); setSelectedPlayerIds(new Set()) }} className="px-4 py-2 text-sm text-slate-600">Cancel</button>
                     <button onClick={() => { actions.addPlayers(pickerOpen.teamId, [...selectedPlayerIds]); setPickerOpen(null); setSelectedPlayerIds(new Set()) }} disabled={selectedPlayerIds.size === 0} className="px-4 py-2 text-sm bg-blue-600 text-white rounded disabled:opacity-40">Add</button>
                   </div>
                 </div>
               </div>
             </div>
+        )}
+
+        {showQuickAddPlayer && pickerOpen && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-semibold text-slate-800">Add new player</h3>
+                <button
+                  onClick={() => setShowQuickAddPlayer(false)}
+                  className="text-slate-400 hover:text-slate-600 text-xl leading-none"
+                >
+                  ×
+                </button>
+              </div>
+              <p className="text-xs text-slate-500">Create and add directly to {pickerOpen.teamId} for this round.</p>
+              {quickAddError && (
+                <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2.5 py-1.5">
+                  {quickAddError}
+                </div>
+              )}
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Name</label>
+                <input
+                  autoFocus
+                  value={quickAddName}
+                  onChange={(e) => setQuickAddName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      handleQuickAddPlayer()
+                    }
+                  }}
+                  placeholder="Player name"
+                  className="w-full border border-slate-200 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Notes (optional)</label>
+                <textarea
+                  value={quickAddNotes}
+                  onChange={(e) => setQuickAddNotes(e.target.value)}
+                  rows={3}
+                  placeholder="Any context for this player"
+                  className="w-full border border-slate-200 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-400 resize-none"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  onClick={() => setShowQuickAddPlayer(false)}
+                  className="px-4 py-2 text-sm text-slate-600"
+                  disabled={quickAddSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleQuickAddPlayer}
+                  disabled={quickAddSaving}
+                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded disabled:opacity-50"
+                >
+                  {quickAddSaving ? 'Adding…' : 'Create + Add'}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {showCarryForwardModal && (() => {
@@ -788,8 +1035,59 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
           )
         })()}
 
+        {/* ── Email Digest Modal ── */}
+        {showEmailModal && (
+          <div className="fixed inset-0 bg-black/60 flex items-start justify-center z-50 p-4 overflow-y-auto">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl mt-4 mb-8">
+
+              {/* Header */}
+              <div className="flex items-center justify-between px-6 py-4 border-b">
+                <div>
+                  <h3 className="font-semibold text-lg">Email Digest</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Preview below — copy and paste into your email client</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([emailHtml], { type: 'text/html' }) })])
+                        .then(() => setEmailSent(true))
+                        .catch(() => {})
+                    }}
+                    className={`px-4 py-2 text-sm rounded font-medium transition-colors flex items-center gap-2 ${
+                      emailSent ? 'bg-green-600 text-white' : 'bg-blue-700 text-white hover:bg-blue-800'
+                    }`}
+                  >
+                    {emailSent ? '✓ Copied!' : '⎘ Copy to Clipboard'}
+                  </button>
+                  <button onClick={() => { setShowEmailModal(false); setEmailSent(false) }} className="text-2xl leading-none text-slate-400 hover:text-slate-600">×</button>
+                </div>
+              </div>
+
+              {/* Error */}
+              {emailError && (
+                <div className="mx-6 mt-4 px-4 py-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+                  {emailError}
+                </div>
+              )}
+
+              {/* iframe preview */}
+              <div className="p-4">
+                <iframe
+                  srcDoc={emailHtml}
+                  title="Email Preview"
+                  className="w-full border border-slate-200 rounded-lg"
+                  style={{ height: '60vh' }}
+                  sandbox="allow-same-origin"
+                />
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* ── Team Sheet Modal ── */}
         {showTeamSheetModal && (
-            <div className="fixed inset-0 bg-black/60 flex items-start justify-center z-50 p-4 overflow-y-auto">
+          <div className="fixed inset-0 bg-black/60 flex items-start justify-center z-50 p-4 overflow-y-auto">
               <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl mt-4 mb-8">
                 <div className="flex items-center justify-between px-6 py-4 border-b">
                   <div>
@@ -959,6 +1257,82 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
 
               </div>
             </div>
+        )}
+
+        {/* ── Vote Results Modal ── */}
+        {showVoteResults && currentRound && (
+          <VoteResults
+            roundId={currentRound.id}
+            teams={teams}
+            roundLabel={currentRound.round_type === 'season' ? `Round ${currentRound.round_number}` : currentRound.name || 'Practice'}
+            onClose={() => setShowVoteResults(null)}
+          />
+        )}
+
+        {/* ── Create Voting Link Modal ── */}
+        {showVoteModal && currentRound && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+              <div>
+                <h3 className="font-semibold text-lg">Voting links</h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {currentRound.round_type === 'season' ? `Round ${currentRound.round_number}` : currentRound.name}
+                </p>
+              </div>
+
+              {/* Team picker */}
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Select team</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {teams.map(t => (
+                    <button
+                      key={t.id}
+                      onClick={() => { setVoteTeam(t.id); setVoteLink(null) }}
+                      className={`py-2 rounded-lg text-sm font-semibold border transition-colors ${
+                        voteTeam === t.id
+                          ? 'bg-indigo-600 text-white border-indigo-600'
+                          : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'
+                      }`}
+                    >
+                      {t.id}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Link area */}
+              {voteTeam && (
+                voteLink ? (
+                  <div className="space-y-2">
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-xs text-slate-600 break-all font-mono">
+                      {voteLink}
+                    </div>
+                    <button
+                      onClick={() => navigator.clipboard.writeText(voteLink)}
+                      className="w-full py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium"
+                    >
+                      Copy link
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleCreateVoteLink}
+                    disabled={voteCreating}
+                    className="w-full py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+                  >
+                    {voteCreating ? 'Creating…' : `Generate link for ${voteTeam}`}
+                  </button>
+                )
+              )}
+
+              <button
+                onClick={() => { setShowVoteModal(false); setVoteLink(null); setVoteTeam(null) }}
+                className="w-full py-2 border rounded-lg text-sm text-slate-600"
+              >
+                Close
+              </button>
+            </div>
+          </div>
         )}
 
       </div>

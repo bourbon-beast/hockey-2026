@@ -19,6 +19,7 @@ export function useRoundManager() {
     const [dragOverInfo, setDragOverInfo] = useState(null)
     const touchDragRef = useRef(null)
     const touchScrollLocked = useRef(false)
+    const touchScrollRAF = useRef(null)
     const unsubscribeSelectionsRef = useRef(null)   // live listener cleanup
     const unsubscribeUnavailRef    = useRef(null)   // live unavailability listener cleanup
 
@@ -226,6 +227,66 @@ export function useRoundManager() {
         }
     }
 
+    const createAndAddPlayer = async (teamId, playerData) => {
+        if (!currentRound || !teamId || !playerData?.name?.trim()) return null
+
+        const created = await DB.createPlayer({
+            name: playerData.name.trim(),
+            assigned_team_id_2026: playerData.assigned_team_id_2026 || teamId,
+            notes: playerData.notes || null,
+        })
+
+        const newPlayer = {
+            id: created.id,
+            name: created.name,
+            status_id: 'new',
+            assigned_team_id_2026: playerData.assigned_team_id_2026 || teamId,
+            notes: playerData.notes || null,
+            default_position: null,
+            is_active: 1,
+            teams_played_2026: [],
+            games_played_2026: {},
+            total_games_2026: 0,
+            stats_2026: null,
+        }
+        setAllPlayers(prev => [...prev, newPlayer])
+
+        const existingSels = getTeamSelectionsOrdered(teamId)
+        const nextSlot = existingSels.length > 0 ? Math.max(...existingSels.map(s => s.slot_number || 0)) + 1 : 1
+
+        await DB.addSelection(currentRound.id, {
+            team_id: teamId,
+            player_id: created.id,
+            slot_number: nextSlot,
+        })
+
+        setRoundData(prev => {
+            if (!prev) return prev
+            return {
+                ...prev,
+                selections: [
+                    ...prev.selections,
+                    {
+                        id: `new-${created.id}-${Date.now()}`,
+                        round_id: currentRound.id,
+                        team_id: teamId,
+                        player_id: created.id,
+                        slot_number: nextSlot,
+                        position: null,
+                        confirmed: 0,
+                        is_unavailable: 0,
+                        note: null,
+                        name: created.name,
+                        status_id: null,
+                        default_position: null,
+                    },
+                ],
+            }
+        })
+
+        return created
+    }
+
     const removePlayer = (teamId, playerId) => {
         if (!currentRound) return
         // Optimistic: remove from selections and decrement game count
@@ -272,14 +333,14 @@ export function useRoundManager() {
         }))
     }
 
-    const updatePosition = async (playerId, position) => {
+    const updatePosition = async (teamId, playerId, position) => {
         if (!currentRound) return
         // Optimistic first — don't wait for Firestore round-trip
         setRoundData(prev => ({
             ...prev,
-            selections: prev.selections.map(s => s.player_id === playerId ? { ...s, position: position || null } : s)
+            selections: prev.selections.map(s => s.team_id === teamId && s.player_id === playerId ? { ...s, position: position || null } : s)
         }))
-        await DB.updateSelectionPosition(currentRound.id, playerId, position)
+        await DB.updateSelectionPosition(currentRound.id, teamId, playerId, position)
     }
 
     const updateNote = async (selectionId, playerId, note) => {
@@ -501,6 +562,22 @@ export function useRoundManager() {
         } else {
             setDragOverInfo(null)
         }
+
+        // Auto-scroll when dragging near viewport edges
+        const EDGE_ZONE = 60
+        const MAX_SPEED = 12
+        const y = touch.clientY
+        const vh = window.innerHeight
+        if (touchScrollRAF.current) { cancelAnimationFrame(touchScrollRAF.current); touchScrollRAF.current = null }
+        if (y > vh - EDGE_ZONE) {
+            const speed = Math.min(MAX_SPEED, ((y - (vh - EDGE_ZONE)) / EDGE_ZONE) * MAX_SPEED)
+            const scroll = () => { window.scrollBy(0, speed); touchScrollRAF.current = requestAnimationFrame(scroll) }
+            touchScrollRAF.current = requestAnimationFrame(scroll)
+        } else if (y < EDGE_ZONE) {
+            const speed = Math.min(MAX_SPEED, ((EDGE_ZONE - y) / EDGE_ZONE) * MAX_SPEED)
+            const scroll = () => { window.scrollBy(0, -speed); touchScrollRAF.current = requestAnimationFrame(scroll) }
+            touchScrollRAF.current = requestAnimationFrame(scroll)
+        }
     }
 
     const handleTouchEnd = (e) => {
@@ -508,6 +585,11 @@ export function useRoundManager() {
         if (touchHoldTimer.current) {
             clearTimeout(touchHoldTimer.current)
             touchHoldTimer.current = null
+        }
+        // Cancel auto-scroll
+        if (touchScrollRAF.current) {
+            cancelAnimationFrame(touchScrollRAF.current)
+            touchScrollRAF.current = null
         }
         if (!touchDragRef.current) return
         const { ghostEl, playerId, fromTeamId, fromBucket } = touchDragRef.current
@@ -608,6 +690,7 @@ export function useRoundManager() {
         actions: {
             setCurrentRound, createRound, deleteRound, updateRound, carryForward, updateMatchDetails,
             addPlayers, removePlayer, markSelectionUnavailable, toggleConfirmed, updatePosition,
+            createAndAddPlayer,
             updateNote,
             handleDragStart, handleDragOverRow, handleDragOverEmpty, handleDragOverColumn,
             handleDropToBucket, handleDrop, handleDragEnd, handleTouchStart, handleTouchMove, handleTouchEnd,

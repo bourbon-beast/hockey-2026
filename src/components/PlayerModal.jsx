@@ -84,11 +84,13 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
     unsure_reason:         player.unsure_reason || '',
     playing_preference:    player.playing_preference || '',
   })
-  const [history, setHistory] = useState([])
-  const [saving, setSaving] = useState(false)
-  const [rounds, setRounds] = useState([])
+  const [history, setHistory]     = useState([])
+  const [saving, setSaving]       = useState(false)
+  const [rounds, setRounds]       = useState([])
   const [unavailMap, setUnavailMap] = useState({})
-  const [teamsPlayed, setTeamsPlayed] = useState(player.teams_played_2026 || [])
+  const [teamsPlayed, setTeamsPlayed]     = useState(player.teams_played_2026 || [])
+  const [gamesPlayed2026, setGamesPlayed2026] = useState(player.games_played_2026 || {})
+  const [stats2026, setStats2026]         = useState(player.stats_2026 || null)
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -98,6 +100,8 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
         if (!data) return
         setHistory(data.history || [])
         setTeamsPlayed(data.teams_played_2026 || [])
+        setGamesPlayed2026(data.games_played_2026 || {})
+        setStats2026(data.stats_2026 || null)
         // Refresh form from Firestore so we have the latest values
         // (the player prop may be from a stale list — e.g. status_id not yet loaded)
         setForm(f => ({
@@ -282,7 +286,7 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
         {/* ── Body ── */}
         <div className="px-6 py-5 space-y-5">
 
-          {/* ── 2026 Status & Assignment ── */}
+          {/* ── 2026 Stats ── */}
           <Section title="2026 Season">
             <Field label="Status">
               <Select
@@ -307,7 +311,45 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
               </select>
             </Field>
 
-            {teamsPlayed.length > 0 && (
+            {/* Games played per team — only show teams with > 0 games */}
+            {Object.keys(gamesPlayed2026).length > 0 && (
+              <div className="bg-blue-50 rounded-lg px-4 py-3 space-y-2">
+                <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Games played</p>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(gamesPlayed2026)
+                    .filter(([, count]) => count > 0)
+                    .sort((a, b) => a[0].localeCompare(b[0]))
+                    .map(([teamId, count]) => (
+                      <span key={teamId} className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white border border-blue-200 text-sm font-semibold text-blue-800">
+                        {teamId}
+                        <span className="text-blue-500 font-normal">×{count}</span>
+                      </span>
+                    ))}
+                </div>
+
+                {/* Stat totals row */}
+                {stats2026 && (
+                  <div className="flex flex-wrap gap-4 mt-2 pt-2 border-t border-blue-200">
+                    {[
+                      { label: 'Goals',  val: stats2026.goals,          color: 'text-blue-700' },
+                      { label: 'Green',  val: stats2026.greenCards,      color: 'text-green-600' },
+                      { label: 'Yellow', val: stats2026.yellowCards,     color: 'text-amber-500' },
+                      { label: 'Red',    val: stats2026.redCards,        color: 'text-red-600'   },
+                      { label: 'GK',     val: stats2026.gkAppearances,   color: 'text-slate-600' },
+                      { label: 'ETS',    val: stats2026.ets,             color: 'text-slate-600' },
+                    ].filter(({ val }) => val > 0).map(({ label, val, color }) => (
+                      <div key={label} className="text-center min-w-[36px]">
+                        <div className={`text-lg font-bold tabular-nums ${color}`}>{val}</div>
+                        <div className="text-xs text-gray-400">{label}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Teams played tags (manual) — only if no HV stats yet */}
+            {Object.keys(gamesPlayed2026).length === 0 && teamsPlayed.length > 0 && (
               <Field label="Teams played 2026" hint="tap × to remove">
                 <div className="flex flex-wrap gap-1.5 mt-1">
                   {teamsPlayed.map(teamId => (
@@ -464,27 +506,23 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
             </>
           )}
 
-          {/* ── 2025 History ── */}
-          {!isNew && (
+          {/* ── 2025 History (collapsed, read-only) ── */}
+          {!isNew && (player.primary_team_id_2025 || player.total_games_2025 > 0 || history.length > 0) && (
             <>
               <Section title="2025 Season">
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <div className="text-sm text-gray-600 space-y-1">
-                    <p>Primary team: <span className="font-medium">{player.primary_team_id_2025 || 'N/A'}</span></p>
-                    <p>Total games: <span className="font-medium">{player.total_games_2025 || 0}</span></p>
+                <div className="bg-gray-50 rounded-lg px-4 py-3 text-sm text-gray-500 space-y-1">
+                  <div className="flex gap-4">
+                    <span>Primary team: <span className="font-medium text-gray-700">{player.primary_team_id_2025 || '—'}</span></span>
+                    <span>Games: <span className="font-medium text-gray-700">{player.total_games_2025 || 0}</span></span>
                   </div>
                   {history.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-gray-200">
-                      <p className="text-sm text-gray-500 mb-1">Team breakdown:</p>
-                      <ul className="text-sm text-gray-600 space-y-0.5">
-                        {history.map((h, i) => (
-                          <li key={i} className="flex items-center gap-1.5">
-                            <span className={`w-2 h-2 rounded-full ${h.role === 'main_squad' ? 'bg-green-500' : 'bg-gray-400'}`} />
-                            {h.team_id} — {h.games_played} games
-                            <span className="text-gray-400">({h.role === 'main_squad' ? 'main' : 'fill-in'})</span>
-                          </li>
-                        ))}
-                      </ul>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {history.map((h, i) => (
+                        <span key={i} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600">
+                          <span className={`w-1.5 h-1.5 rounded-full ${h.role === 'main_squad' ? 'bg-green-500' : 'bg-gray-400'}`} />
+                          {h.team_id} — {h.games_played}g
+                        </span>
+                      ))}
                     </div>
                   )}
                 </div>

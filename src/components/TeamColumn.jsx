@@ -152,7 +152,7 @@ export default function TeamColumn({
     return (
         <div
             data-team-id={team.id}
-            className={`bg-white rounded-lg border overflow-hidden transition-colors ${
+            className={`relative bg-white rounded-lg border overflow-hidden transition-colors ${
                 draggedPlayer && draggedPlayer.fromTeamId !== team.id && dragOverInfo?.teamId === team.id
                     ? 'border-blue-400 ring-2 ring-blue-300'
                     : 'border-slate-200'
@@ -311,8 +311,7 @@ export default function TeamColumn({
                                 ${!posStyle && !sortMode ? 'hover:bg-slate-50' : ''}
                                 ${isDragOver && !sortMode ? (dragOverInfo.position === 'above' ? 'border-t-2 border-t-blue-400' : 'border-b-2 border-b-blue-400') : ''}`}
                         >
-                            <div className={`flex items-center gap-2 px-3 w-full ${sortMode ? 'py-3' : 'py-2'}`}
-                                 style={{ pointerEvents: draggedPlayer ? 'none' : 'auto' }}>
+                            <div className={`flex items-center gap-2 px-3 w-full ${sortMode ? 'py-3' : 'py-2'}`}>
 
                                 {/* Sort mode: ↑↓ buttons (mobile) vs drag handle (desktop always, mobile when not in sort mode) */}
                                 {sortMode ? (
@@ -332,6 +331,13 @@ export default function TeamColumn({
                                     <span
                                         className="text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing flex-shrink-0 touch-none select-none"
                                         style={{ padding: '12px 10px', margin: '-12px -4px', fontSize: '16px', lineHeight: 1 }}
+                                        draggable
+                                        onDragStart={(e) => {
+                                            const row = e.target.closest('[data-player-id]')
+                                            if (row) e.dataTransfer.setDragImage(row, 0, row.offsetHeight / 2)
+                                            actions.handleDragStart(e, sel, team.id)
+                                        }}
+                                        onDragEnd={actions.handleDragEnd}
                                         onTouchStart={(e) => actions.handleTouchStart(e, sel, team.id)}
                                         onTouchMove={actions.handleTouchMove}
                                         onTouchEnd={actions.handleTouchEnd}
@@ -381,7 +387,7 @@ export default function TeamColumn({
                                     </div>
                                 </div>
                                 {!sortMode && (
-                                    <select value={sel.position || ''} onChange={(e) => actions.updatePosition(sel.player_id, e.target.value)}
+                                    <select value={sel.position || ''} onChange={(e) => actions.updatePosition(team.id, sel.player_id, e.target.value)}
                                         className={`text-xs rounded px-1 py-0.5 w-14 flex-shrink-0 border font-medium ${posStyle ? posStyle.selectCls : 'border-slate-200 text-slate-400 bg-white'}`}>
                                         <option value="">Pos</option>
                                         {POSITIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
@@ -430,6 +436,13 @@ export default function TeamColumn({
                         <span
                             className="text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing flex-shrink-0 touch-none select-none"
                             style={{ padding: '12px 10px', margin: '-12px -4px', fontSize: '16px', lineHeight: 1 }}
+                            draggable
+                            onDragStart={(e) => {
+                                const row = e.target.closest('[data-player-id]')
+                                if (row) e.dataTransfer.setDragImage(row, 0, row.offsetHeight / 2)
+                                actions.handleDragStart(e, sel, team.id, true)
+                            }}
+                            onDragEnd={actions.handleDragEnd}
                             onTouchStart={(e) => actions.handleTouchStart(e, sel, team.id, true)}
                             onTouchMove={actions.handleTouchMove}
                             onTouchEnd={actions.handleTouchEnd}
