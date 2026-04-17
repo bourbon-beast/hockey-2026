@@ -320,12 +320,14 @@ export default function TeamColumn({
                                         <button
                                             onClick={() => idx > 0 && actions.moveSelectionByIndex(team.id, idx, idx - 1)}
                                             disabled={idx === 0}
-                                            className="w-8 h-7 flex items-center justify-center rounded text-slate-500 hover:text-blue-600 hover:bg-blue-100 disabled:opacity-20 transition-colors font-bold text-base"
+                                            aria-label={`Move ${sel.name} up`}
+                                            className="w-8 h-7 flex items-center justify-center rounded text-slate-500 hover:text-blue-600 hover:bg-blue-100 disabled:opacity-20 transition-colors font-bold text-base focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-none"
                                         >↑</button>
                                         <button
                                             onClick={() => idx < selections.length - 1 && actions.moveSelectionByIndex(team.id, idx, idx + 1)}
                                             disabled={idx === selections.length - 1}
-                                            className="w-8 h-7 flex items-center justify-center rounded text-slate-500 hover:text-blue-600 hover:bg-blue-100 disabled:opacity-20 transition-colors font-bold text-base"
+                                            aria-label={`Move ${sel.name} down`}
+                                            className="w-8 h-7 flex items-center justify-center rounded text-slate-500 hover:text-blue-600 hover:bg-blue-100 disabled:opacity-20 transition-colors font-bold text-base focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-none"
                                         >↓</button>
                                     </div>
                                 ) : (
@@ -340,7 +342,8 @@ export default function TeamColumn({
 
                                 <span className="text-slate-400 text-xs w-4 text-center flex-shrink-0">{idx + 1}</span>
                                 <button onClick={() => actions.toggleConfirmed(team.id, sel.player_id)} title={avail.title}
-                                    className={`w-5 h-5 rounded-full border-2 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${avail.bg} ${avail.border}`}>
+                                    aria-label={`Toggle availability status for ${sel.name}`}
+                                    className={`w-5 h-5 rounded-full border-2 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${avail.bg} ${avail.border} focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 focus:outline-none`}>
                                     {avail.icon}
                                 </button>
                                 <div className="flex-1 flex items-center gap-1.5 min-w-0">
@@ -362,13 +365,14 @@ export default function TeamColumn({
                                             onClick={e => setNoteOpenId(noteOpenId === sel.id ? null : sel.id)}
                                             data-note-btn={sel.id}
                                             title={sel.note || 'Add note'}
-                                            className={`flex items-center justify-center rounded transition-colors ${
+                                            aria-label={sel.note ? `Edit note for ${sel.name}` : `Add note for ${sel.name}`}
+                                            className={`flex items-center justify-center rounded p-0.5 focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-none transition-colors ${
                                                 sel.note
                                                     ? 'text-yellow-500 hover:text-yellow-600'
                                                     : 'text-slate-300 hover:text-slate-500'
                                             }`}
                                         >
-                                            <MessageSquare size={13} strokeWidth={2} />
+                                            <MessageSquare size={13} strokeWidth={2} aria-hidden="true" />
                                         </button>
                                         {noteOpenId === sel.id && (
                                             <NotePopover
@@ -388,8 +392,9 @@ export default function TeamColumn({
                                     </select>
                                 )}
                                 <button onClick={() => actions.removePlayer(team.id, sel.player_id)}
-                                    className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                    aria-label={`Remove ${sel.name} from squad`}
+                                    className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0 p-0.5 rounded focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-none">
+                                    <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                                         <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
                                     </svg>
                                 </button>
@@ -441,10 +446,12 @@ export default function TeamColumn({
                             </span>
                         </div>
                         <button onClick={() => actions.markSelectionUnavailable(team.id, sel.player_id, false)}
-                            className="text-slate-400 hover:text-blue-500 text-xs sm:opacity-0 sm:group-hover:opacity-100 flex-shrink-0">↑ squad</button>
+                            aria-label={`Move ${sel.name} back to squad`}
+                            className="text-slate-400 hover:text-blue-500 text-xs sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100 flex-shrink-0 px-1 rounded focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-none">↑ squad</button>
                         <button onClick={() => actions.removePlayer(team.id, sel.player_id)}
-                            className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                            aria-label={`Remove ${sel.name} completely`}
+                            className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0 p-0.5 rounded focus-visible:ring-2 focus-visible:ring-blue-500 focus:outline-none">
+                            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                                 <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
                             </svg>
                         </button>

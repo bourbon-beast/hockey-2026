@@ -1,0 +1,3 @@
+## 2024-03-24 - Missing ARIA Labels on Remove Player and Toggle Confirmed Buttons
+**Learning:** Found several icon-only buttons in `TeamColumn.jsx` and `RoundPlanner.jsx` that lack screen reader context, relying purely on visual SVG shapes. For instance, the "remove player" button uses an SVG "x" icon without an accessible label, and "toggle confirmed" relies on `title` which is insufficient for proper a11y.
+**Action:** Always ensure icon-only interactive elements (`<button>`) have a clear `aria-label` describing the action (e.g., `aria-label={`Remove ${sel.name} from squad`}`) and `aria-hidden="true"` on the inner SVGs.
