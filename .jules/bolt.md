@@ -1,0 +1,3 @@
+## 2024-04-12 - Prevent Re-renders with getAvailablePlayers
+**Learning:** Re-computing expensive O(N) queries mapping a large collection of player availability data continuously on each render cycle in RoundPlanner creates noticeable UI stutter, especially given that RoundPlanner is a heavily complex component interacting closely with dragging/dropping.
+**Action:** Always wrap heavy list derivations (such as filtering all available players per team based on dynamic round limits and mapping over selections) using `useMemo` so we only run these loops when dependent variables structurally change.
