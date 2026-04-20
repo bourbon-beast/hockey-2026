@@ -368,7 +368,8 @@ export default function TeamColumn({
                                             onClick={e => setNoteOpenId(noteOpenId === sel.id ? null : sel.id)}
                                             data-note-btn={sel.id}
                                             title={sel.note || 'Add note'}
-                                            className={`flex items-center justify-center rounded transition-colors ${
+                                            aria-label={sel.note ? `Edit note for ${sel.name}` : `Add note for ${sel.name}`}
+                                            className={`p-0.5 flex items-center justify-center rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                                                 sel.note
                                                     ? 'w-5 h-5 bg-yellow-400 text-white shadow-sm hover:bg-yellow-500'
                                                     : 'w-5 h-5 text-slate-300 hover:text-slate-500'
@@ -397,8 +398,11 @@ export default function TeamColumn({
                                         {POSITIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
                                     </select>
                                 )}
-                                <button onClick={() => actions.removePlayer(team.id, sel.player_id)}
-                                    className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
+                                <button
+                                    onClick={() => actions.removePlayer(team.id, sel.player_id)}
+                                    aria-label={`Remove ${sel.name} from squad`}
+                                    className="p-0.5 text-slate-300 hover:text-red-500 transition-colors flex-shrink-0 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                                >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                                         <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
                                     </svg>
@@ -459,8 +463,11 @@ export default function TeamColumn({
                         </div>
                         <button onClick={() => actions.markSelectionUnavailable(team.id, sel.player_id, false)}
                             className="text-slate-400 hover:text-blue-500 text-xs sm:opacity-0 sm:group-hover:opacity-100 flex-shrink-0">↑ squad</button>
-                        <button onClick={() => actions.removePlayer(team.id, sel.player_id)}
-                            className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
+                        <button
+                            onClick={() => actions.removePlayer(team.id, sel.player_id)}
+                            aria-label={`Remove ${sel.name} from unavailable list`}
+                            className="p-0.5 text-slate-300 hover:text-red-500 transition-colors flex-shrink-0 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                        >
                             <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                                 <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
                             </svg>
