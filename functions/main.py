@@ -813,11 +813,23 @@ def _build_leaders(db):
     }
 
 
-def format_text(summaries, leaders=None):
+def _ordinal(n):
+    """Return ordinal string for an integer: 1 → '1st', 2 → '2nd' etc."""
+    if not n:
+        return '—'
+    s = ['th', 'st', 'nd', 'rd']
+    v = n % 100
+    return str(n) + (s[(v - 20) % 10] if (v - 20) % 10 < len(s) else s[v] if v < len(s) else s[0])
+
+
+def format_text(summaries, leaders=None, ladder_data=None):
     SEP = '------------------------------'
     today = date.today().strftime('%d %b %Y')
+    last_rounds = [s['last_result']['round'] for s in summaries if s.get('last_result')]
+    last_round_num = last_rounds[0] if last_rounds else None
+    title = f"Mentone Men's — Round {last_round_num} Wrap" if last_round_num else "Mentone Men's — Round Wrap"
     lines = [
-        'Mentone Hockey Club - Weekly Update',
+        title,
         'Week ending ' + today,
         'Please keep your unavailability up to date: https://docs.google.com/spreadsheets/d/1MWl3gvFFzniLRFACXHmzPzsAQRIYJsMPlSlnNKh4-p8/edit?usp=sharing',
         '',
@@ -848,8 +860,21 @@ def format_text(summaries, leaders=None):
         lines.append(_fmt_fixture_line(s['team_id'], f))
 
     # ── Season leaders ────────────────────────────────────────────────────────
+    if ladder_data or (leaders and (leaders.get('scorers') or leaders.get('hackers'))):
+        lines += ['', SEP, 'SEASON STATS', SEP]
+
+    # Ladder positions
+    TEAM_ORDER = ['PL', 'PLR', 'PB', 'PC', 'PE', 'Metro']
+    if ladder_data:
+        lines.append('Ladder:')
+        for team_id in TEAM_ORDER:
+            d = ladder_data.get(team_id)
+            if not d or d.get('error'):
+                continue
+            finals = ' 🟢' if d.get('inFinals') else ''
+            lines.append(f"  {TEAM_DISPLAY_NAMES.get(team_id, team_id):<22} {_ordinal(d['position'])} / {d['total']}{finals}")
+
     if leaders and (leaders.get('scorers') or leaders.get('hackers')):
-        lines += ['', SEP, 'SEASON LEADERS', SEP]
 
         if leaders.get('scorers'):
             scorer_parts = []
@@ -890,7 +915,7 @@ def format_text(summaries, leaders=None):
 
     return '\n'.join(lines)
 
-def format_html(summaries, leaders=None):
+def format_html(summaries, leaders=None, ladder_data=None):
     today = date.today().strftime('%d %b %Y')
     S = {
         'wrap':    'font-family:Arial,sans-serif;font-size:14px;color:#1e293b;max-width:600px;',
@@ -920,12 +945,15 @@ def format_html(summaries, leaders=None):
 
     next_rounds    = [s['next_fixture']['round'] for s in summaries if s.get('next_fixture')]
     next_round_num = next_rounds[0] if next_rounds else None
+    last_rounds    = [s['last_result']['round'] for s in summaries if s.get('last_result')]
+    last_round_num = last_rounds[0] if last_rounds else None
+    title = f"Round {last_round_num} Wrap" if last_round_num else "Round Wrap"
 
     UNAVAIL_URL = ('https://docs.google.com/spreadsheets/d/'
                    '1MWl3gvFFzniLRFACXHmzPzsAQRIYJsMPlSlnNKh4-p8/edit?usp=sharing')
 
     parts = [f'<div style="{S["wrap"]}">',
-             f'<p style="{S["h1"]}">Mentone Hockey Club — Weekly Update</p>',
+             f'<p style="{S["h1"]}">Mentone Men\'s — {title}</p>',
              f'<p style="{S["sub"]}">Week ending {today}</p>',
              f'<p style="font-size:12px;color:#64748b;margin:0 0 12px 0;">'
              f'Please keep your unavailability up to date: '
@@ -968,12 +996,41 @@ def format_html(summaries, leaders=None):
             '<div style="margin:0 0 8px 0;">%s</div>' % fixture_list,
         ]
 
+    # ── Ladder positions ──────────────────────────────────────────────────────
+    TEAM_ORDER = ['PL', 'PLR', 'PB', 'PC', 'PE', 'Metro']
+    if ladder_data:
+        ladder_rows = ''
+        for team_id in TEAM_ORDER:
+            d = ladder_data.get(team_id)
+            if not d or d.get('error'):
+                continue
+            finals_dot = f'&nbsp;<span style="color:#16a34a;font-weight:bold;">●</span>' if d.get('inFinals') else ''
+            pos_colour = '#16a34a' if d.get('inFinals') else '#64748b'
+            bg = '#f8fafc' if TEAM_ORDER.index(team_id) % 2 == 0 else '#ffffff'
+            ladder_rows += (
+                f'<tr style="background:{bg};">'
+                f'<td style="padding:3px 6px;font-weight:500;color:#1e293b;">{TEAM_DISPLAY_NAMES.get(team_id, team_id)}</td>'
+                f'<td style="padding:3px 6px;font-weight:bold;color:{pos_colour};text-align:right;">'
+                f'{_ordinal(d["position"])}<span style="color:#94a3b8;font-weight:normal;"> / {d["total"]}</span>'
+                f'{finals_dot}</td>'
+                f'</tr>'
+            )
+        if ladder_rows:
+            parts += [
+                '<hr style="%s">' % S['rule'],
+                '<p style="%s">Season Stats</p>' % S['section'],
+                '<p style="font-size:12px;font-weight:bold;color:#475569;margin:0 0 4px 0;">Ladder</p>',
+                f'<table style="border-collapse:collapse;width:100%;margin-bottom:12px;">{ladder_rows}</table>',
+            ]
+
     # ── Season leaders ────────────────────────────────────────────────────────
     if leaders and (leaders.get('scorers') or leaders.get('hackers')):
-        parts += [
-            '<hr style="%s">' % S['rule'],
-            '<p style="%s">Season Leaders</p>' % S['section'],
-        ]
+        # Only add the hr/section header if ladder didn't already add it
+        if not ladder_data:
+            parts += [
+                '<hr style="%s">' % S['rule'],
+                '<p style="%s">Season Stats</p>' % S['section'],
+            ]
 
         # ── Top Scorers table ─────────────────────────────────────────────────
         if leaders.get('scorers'):
@@ -1166,9 +1223,23 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
         info(f'⚠️  Leaders build failed: {e}')
         leaders = None
 
-    text_output   = format_text(summaries, leaders)
-    html_output   = format_html(summaries, leaders)
+    # Load ladder positions (written by syncLadder which runs before syncHv in master sync)
+    try:
+        ladder_snap = db.collection('hvSync').document('ladders').get()
+        ladder_data = ladder_snap.to_dict().get('ladders', {}) if ladder_snap.exists else {}
+        info(f"   📊 Ladder data loaded: {len(ladder_data)} teams")
+    except Exception as e:
+        info(f'⚠️  Ladder load failed: {e}')
+        ladder_data = {}
+
+    text_output   = format_text(summaries, leaders, ladder_data)
+    html_output   = format_html(summaries, leaders, ladder_data)
     serial_output = [serialise(s) for s in summaries]
+
+    # Derive last played round for subject/title
+    last_round_nums = [s['last_result']['round'] for s in summaries if s.get('last_result')]
+    last_round_num  = last_round_nums[0] if last_round_nums else None
+    subject = f"Mentone Men's — Round {last_round_num} Wrap" if last_round_num else "Mentone Men's — Round Wrap"
 
     # Determine upcoming round number — this digest's key
     next_round_nums = [s['next_fixture']['round'] for s in summaries if s.get('next_fixture')]
@@ -1185,6 +1256,7 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
     db.collection('hvSync').document('latest').set({
         'syncedAt': now_iso, 'text': text_output,
         'html': html_output, 'summaries': serial_output,
+        'subject': subject,
     })
     info('\n💾 Saved hvSync/latest')
 
@@ -1193,6 +1265,7 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
         doc_id = f'round_{digest_round}'
         db.collection('weeklyDigests').document(doc_id).set({
             'roundNumber': digest_round, 'generatedAt': now_iso,
+            'subject': subject,
             'text': text_output, 'html': html_output, 'summaries': serial_output,
         })
         info(f'💾 Saved weeklyDigests/{doc_id}')

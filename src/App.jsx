@@ -16,12 +16,12 @@ const NAV = [
   { id: 'round',   label: 'Planner',       Icon: ClipboardList },
   { id: 'fixture', label: 'Fixture',       Icon: Calendar      },
   { id: 'unavail', label: 'Availability',  Icon: UserX         },
-  { id: 'team',    label: 'Teams',         Icon: LayoutGrid    },
-  { id: 'players', label: 'Players',       Icon: Users         },
-  { id: 'admin',   label: 'Admin',         Icon: Settings, adminOnly: true },
+  { id: 'team',    label: 'Teams',         Icon: LayoutGrid,   adminOnly: true },
+  { id: 'players', label: 'Players',       Icon: Users,        adminOnly: true },
+  { id: 'admin',   label: 'Admin',         Icon: Settings,     adminOnly: true },
 ]
 
-const MOBILE_TABS = ['round', 'fixture', 'unavail', 'team']
+const MOBILE_TABS = ['round', 'fixture', 'unavail']
 
 function App() {
   const [view, setView]               = useState('round')
@@ -102,8 +102,8 @@ function App() {
 
       {/* Main content — bottom padding on mobile to clear tab bar */}
       <main className="p-3 sm:p-6 pb-20 sm:pb-6">
-        {view === 'players' && <AllPlayers statuses={statuses} teams={teams} onSelectPlayer={openPlayer} refreshKey={refreshKey} onRefresh={refresh} />}
-        {view === 'team'    && <TeamView teams={teams} statuses={statuses} selectedTeam={selectedTeam} onSelectTeam={setSelectedTeam} onSelectPlayer={openPlayer} refreshKey={refreshKey} onRefresh={refresh} isAdmin={isAdmin} />}
+        {view === 'players' && isAdmin && <AllPlayers statuses={statuses} teams={teams} onSelectPlayer={openPlayer} refreshKey={refreshKey} onRefresh={refresh} />}
+        {view === 'team'    && isAdmin && <TeamView teams={teams} statuses={statuses} selectedTeam={selectedTeam} onSelectTeam={setSelectedTeam} onSelectPlayer={openPlayer} refreshKey={refreshKey} onRefresh={refresh} isAdmin={isAdmin} />}
         {view === 'round'   && <RoundPlanner statuses={statuses} onSelectPlayer={openPlayer} isAdmin={isAdmin} />}
         {view === 'unavail' && <UnavailabilityManager onSelectPlayer={openPlayer} />}
         {view === 'fixture' && <FixtureView teams={teams} isAdmin={isAdmin} />}

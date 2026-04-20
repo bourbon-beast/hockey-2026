@@ -1,23 +1,20 @@
-// src/components/AdminView.jsx
 // Admin-only page — consolidates all sync operations and management tools.
-// Syncs currently live on other pages too — they'll be moved here once each
-// section is built out. For now this is the shell + HV Stats sync.
 
 import { useState } from 'react'
-import { Settings, RefreshCw, Users, Calendar } from 'lucide-react'
+import { Settings, RefreshCw, Calendar } from 'lucide-react'
 import HvStatsSync from './admin/HvStatsSync'
 
 const SECTIONS = [
-  { id: 'hv',     label: 'HV Stats',      Icon: RefreshCw,  desc: 'Scrape match cards, review & confirm player stats' },
-  { id: 'unavail',label: 'Availability',  Icon: Calendar,   desc: 'Sync unavailability from Google Sheets' },
-  { id: 'ladder', label: 'Ladder',        Icon: Users,      desc: 'Update ladder positions from HV' },
+  { id: 'hv',     label: 'HV Sync',      Icon: RefreshCw, desc: 'Scrapes results, fixtures, player stats & generates weekly digest' },
+  { id: 'unavail',label: 'Availability', Icon: Calendar,  desc: 'Sync unavailability from Google Sheets' },
 ]
 
 export default function AdminView() {
   const [activeSection, setActiveSection] = useState('hv')
+  const active = SECTIONS.find(s => s.id === activeSection)
 
   return (
-    <div className="space-y-4">
+    <div className="max-w-4xl mx-auto space-y-4">
 
       {/* ── Page header ── */}
       <div className="flex items-center gap-3">
@@ -30,35 +27,41 @@ export default function AdminView() {
         </div>
       </div>
 
-      {/* ── Section tabs ── */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <div className="flex border-b border-slate-100">
+      {/* ── Layout: sidebar nav + content ── */}
+      <div className="flex gap-4 items-start">
+
+        {/* Sidebar nav */}
+        <div className="w-44 flex-shrink-0 bg-white rounded-xl border border-slate-200 overflow-hidden">
           {SECTIONS.map(s => (
-            <button key={s.id} onClick={() => setActiveSection(s.id)}
-              className={`flex-1 flex flex-col items-center gap-1 py-3 px-2 text-xs font-semibold border-b-2 transition-colors ${
-                activeSection === s.id
-                  ? 'border-blue-600 text-blue-600 bg-blue-50/40'
-                  : 'border-transparent text-slate-400 hover:text-slate-600'
-              }`}>
-              <s.Icon size={16} strokeWidth={1.75} />
-              <span>{s.label}</span>
+            <button
+              key={s.id}
+              onClick={() => setActiveSection(s.id)}
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm font-medium transition-colors border-l-2
+                ${activeSection === s.id
+                  ? 'border-blue-600 text-blue-600 bg-blue-50/50'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
+            >
+              <s.Icon size={14} strokeWidth={2} className="flex-shrink-0" />
+              {s.label}
             </button>
           ))}
         </div>
 
-        {/* ── Section description ── */}
-        <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100">
-          <p className="text-xs text-slate-500">
-            {SECTIONS.find(s => s.id === activeSection)?.desc}
-          </p>
+        {/* Content panel */}
+        <div className="flex-1 min-w-0 space-y-3">
+
+          {/* Section header */}
+          <div className="flex items-center gap-2">
+            {active && <active.Icon size={14} strokeWidth={2} className="text-slate-400 flex-shrink-0" />}
+            <p className="text-xs text-slate-500">{active?.desc}</p>
+          </div>
+
+          {/* Section content */}
+          {activeSection === 'hv'      && <HvStatsSync />}
+          {activeSection === 'unavail' && <ComingSoon label="Availability Sync" note="Moving from Round Planner — coming soon" />}
         </div>
+
       </div>
-
-      {/* ── Section content ── */}
-      {activeSection === 'hv'      && <HvStatsSync />}
-      {activeSection === 'unavail' && <ComingSoon label="Availability Sync" note="Moving from Round Planner — coming soon" />}
-      {activeSection === 'ladder'  && <ComingSoon label="Ladder Sync" note="Moving from Fixture view — coming soon" />}
-
     </div>
   )
 }

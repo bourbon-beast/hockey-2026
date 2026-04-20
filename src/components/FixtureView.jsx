@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Clock, MapPin, ChevronDown, RefreshCw, Database, Copy, Check } from 'lucide-react'
+import { Clock, MapPin, ChevronDown, Copy, Check } from 'lucide-react'
 import { getRounds, getRoundMatches, getDigestHistory } from '../db'
-import { auth } from '../firebase'
 
 // ── Team display names ────────────────────────────────────────────────────────
 const TEAM_NAMES = {
@@ -310,16 +309,11 @@ function FixturePanel({ teams }) {
 }
 
 // ── Digest panel ──────────────────────────────────────────────────────────────
-function DigestPanel({ isAdmin }) {
+function DigestPanel() {
   const [history, setHistory]         = useState([])
   const [selected, setSelected]       = useState(null)
   const [loadingHistory, setLoadingH] = useState(true)
   const [copied, setCopied]           = useState(false)
-  const [syncing, setSyncing]         = useState(null) // 'hv' | 'ladder' | null
-  const [syncResult, setSyncResult]   = useState(null) // { ok, label } | null
-
-  const SYNC_HV_URL     = import.meta.env.VITE_SYNC_HV_URL
-  const SYNC_LADDER_URL = import.meta.env.VITE_SYNC_LADDER_URL
 
   const loadHistory = () => {
     setLoadingH(true)
@@ -332,36 +326,6 @@ function DigestPanel({ isAdmin }) {
   }
 
   useEffect(() => { loadHistory() }, [])
-
-  const runSync = async (type) => {
-    const url = type === 'hv' ? SYNC_HV_URL : SYNC_LADDER_URL
-    if (!url) {
-      setSyncResult({ ok: false, label: 'URL not configured' })
-      return
-    }
-    setSyncing(type)
-    setSyncResult(null)
-    try {
-      const idToken = await auth.currentUser?.getIdToken()
-      const res  = await fetch(url, {
-        method: 'POST',
-        headers: idToken ? { 'Authorization': `Bearer ${idToken}` } : {},
-      })
-      const data = await res.json()
-      setSyncResult({
-        ok:    data.ok === true,
-        label: data.ok
-          ? (type === 'hv' ? `Synced — Round ${data.digestRound}` : 'Ladder updated')
-          : 'Sync failed',
-      })
-      if (data.ok && type === 'hv') loadHistory() // refresh digest list after HV sync
-    } catch (e) {
-      setSyncResult({ ok: false, label: 'Network error' })
-    } finally {
-      setSyncing(null)
-      setTimeout(() => setSyncResult(null), 4000)
-    }
-  }
 
   const handleCopy = async () => {
     if (!selected) return
@@ -429,45 +393,6 @@ function DigestPanel({ isAdmin }) {
         </select>
         <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
       </div>
-
-      {/* Toolbar */}
-      {/* Sync buttons — admin only */}
-      {isAdmin && (
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => runSync('hv')}
-            disabled={!!syncing}
-            className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold
-                       px-2 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600
-                       hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50
-                       disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            <RefreshCw size={11} className={syncing === 'hv' ? 'animate-spin' : ''} strokeWidth={2.5} />
-            {syncing === 'hv' ? 'Syncing…' : 'Sync Results'}
-          </button>
-          <button
-            onClick={() => runSync('ladder')}
-            disabled={!!syncing}
-            className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold
-                       px-2 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600
-                       hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50
-                       disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            <Database size={11} className={syncing === 'ladder' ? 'animate-spin' : ''} strokeWidth={2.5} />
-            {syncing === 'ladder' ? 'Syncing…' : 'Sync Ladder'}
-          </button>
-        </div>
-      )}
-
-      {/* Sync result feedback */}
-      {isAdmin && syncResult && (
-        <div className={`text-xs font-medium px-3 py-1.5 rounded-lg text-center transition-all
-                         ${syncResult.ok
-                           ? 'bg-green-50 text-green-700 border border-green-200'
-                           : 'bg-red-50 text-red-600 border border-red-200'}`}>
-          {syncResult.ok ? '✓ ' : '✕ '}{syncResult.label}
-        </div>
-      )}
 
       {/* Toolbar — generated timestamp + copy */}
       <div className="flex items-center justify-between gap-3">
@@ -550,7 +475,7 @@ export default function FixtureView({ teams, isAdmin }) {
             <h3 className="text-sm font-semibold text-slate-600">Weekly Digest</h3>
             <div className="flex-1 h-px bg-slate-200" />
           </div>
-          <DigestPanel isAdmin={isAdmin} />
+          <DigestPanel />
         </div>
 
       </div>

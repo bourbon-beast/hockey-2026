@@ -1,15 +1,15 @@
 // src/components/admin/HvStatsSync.jsx
-// HV Stats admin panel — two sub-tabs:
-//   Sync   — run syncHv, handle unmatched names, manage aliases
-//   Review — browse stored playerStats for any round/team from Firestore
+// HV Sync admin panel — master sync + individual parts, unmatched names, aliases, review
 
 import { useState, useEffect } from 'react'
 import { auth, db } from '../../firebase'
-import { doc, updateDoc, deleteField, collection, getDocs, getDoc } from 'firebase/firestore'
+import { doc, updateDoc, deleteField, getDoc } from 'firebase/firestore'
 import { getPlayers, getHvNameAliases, getHvUnmatchedNames, getRounds, saveHvAlias, resolveHvUnmatchedName, createPlayer, clearStatsLastSyncForHvName } from '../../db'
-import { RefreshCw, ChevronDown, ChevronUp, Trash2, Check, Eye } from 'lucide-react'
+import { RefreshCw, ChevronDown, ChevronUp, Trash2, Check, Eye, Zap } from 'lucide-react'
 
-const SYNC_HV_URL = import.meta.env.VITE_SYNC_HV_URL
+const SYNC_HV_URL           = import.meta.env.VITE_SYNC_HV_URL
+const SYNC_LADDER_URL       = import.meta.env.VITE_SYNC_LADDER_URL
+const SYNC_PLAYER_STATS_URL = import.meta.env.VITE_SYNC_PLAYER_STATS_URL
 const SS_KEY = 'admin-hv-sync-state'
 
 // ── Persist sync results across navigation ────────────────────────────────────
@@ -21,16 +21,19 @@ function saveSyncState(s) {
 }
 
 export default function HvStatsSync() {
-  const [subTab, setSubTab]         = useState('sync')
-  const [phase, setPhase]           = useState(() => loadSyncState().phase || 'idle')
-  const [log, setLog]               = useState(() => loadSyncState().log || [])
-  const [unmatched, setUnmatched]   = useState(() => loadSyncState().unmatched || [])
-  const [showLog, setShowLog]       = useState(false)
-  const [allPlayers, setAllPlayers] = useState([])
-  const [aliases, setAliases]       = useState({})
+  const [subTab, setSubTab]           = useState('sync')
+  const [phase, setPhase]             = useState(() => loadSyncState().phase || 'idle')
+  const [log, setLog]                 = useState(() => loadSyncState().log || [])
+  const [unmatched, setUnmatched]     = useState(() => loadSyncState().unmatched || [])
+  const [showLog, setShowLog]         = useState(false)
+  const [allPlayers, setAllPlayers]   = useState([])
+  const [aliases, setAliases]         = useState({})
   const [resolutions, setResolutions] = useState({})
-  const [saving, setSaving]         = useState({})
-  const [saved, setSaved]           = useState({})
+  const [saving, setSaving]           = useState({})
+  const [saved, setSaved]             = useState({})
+  // Individual sync states
+  const [ladderPhase, setLadderPhase]           = useState('idle')
+  const [playerStatsPhase, setPlayerStatsPhase] = useState('idle')
 
   useEffect(() => {
     getPlayers(true).then(p => setAllPlayers(p.sort((a, b) => a.name.localeCompare(b.name))))
@@ -78,6 +81,65 @@ export default function HvStatsSync() {
     }
   }
 
+  // Helper: fire a single URL and return { ok, log }
+  const _callSync = async (url) => {
+    const idToken = await auth.currentUser?.getIdToken()
+    const res  = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}) },
+    })
+    return res.json()
+  }
+
+  // Master sync: ladder first (so digest has fresh positions), then HV
+  const runMasterSync = async () => {
+    setPhase('running'); setLadderPhase('running')
+    setLog([]); setUnmatched([]); setSaved({}); setResolutions({})
+    try {
+      // Step 1: Ladder sync first so hvSync/ladders is fresh for the digest
+      const ladderData = await _callSync(SYNC_LADDER_URL)
+      setLadderPhase(ladderData.ok ? 'done' : 'error')
+      if (!ladderData.ok) { setPhase('idle'); return }
+
+      // Step 2: HV sync (results, fixtures, player stats, digest — reads fresh ladder)
+      const hvData = await _callSync(SYNC_HV_URL)
+      const rawLog       = hvData.log || []
+      const rawUnmatched = (hvData.unmatchedHvNames || []).filter(n => n && n.trim() && n !== 'Fill-ins')
+      setLog(rawLog)
+      setUnmatched(rawUnmatched)
+      setPhase(hvData.ok ? 'done' : 'error')
+    } catch (e) {
+      setLog(l => [...l, `Network error: ${e.message}`])
+      setPhase('error'); setLadderPhase('error')
+    }
+  }
+
+  // Individual: player stats only
+  const runPlayerStatsSync = async () => {
+    setPlayerStatsPhase('running')
+    try {
+      const data = await _callSync(SYNC_PLAYER_STATS_URL)
+      setPlayerStatsPhase(data.ok ? 'done' : 'error')
+    } catch (e) {
+      setPlayerStatsPhase('error')
+    } finally {
+      setTimeout(() => setPlayerStatsPhase('idle'), 4000)
+    }
+  }
+
+  // Individual: ladder only
+  const runLadderSync = async () => {
+    setLadderPhase('running')
+    try {
+      const data = await _callSync(SYNC_LADDER_URL)
+      setLadderPhase(data.ok ? 'done' : 'error')
+    } catch (e) {
+      setLadderPhase('error')
+    } finally {
+      setTimeout(() => setLadderPhase('idle'), 4000)
+    }
+  }
+
   const handleSaveAlias = async (hvName) => {
     const playerId = resolutions[hvName]
     if (!playerId) return
@@ -107,7 +169,7 @@ export default function HvStatsSync() {
 
       {/* Sub-tab bar */}
       <div className="flex gap-0.5 bg-slate-100 p-1 rounded-lg">
-        {[['sync', 'Sync', RefreshCw], ['review', 'Review data', Eye]].map(([id, label, Icon]) => (
+        {[['sync', 'Sync & Results', RefreshCw], ['review', 'Review data', Eye]].map(([id, label, Icon]) => (
           <button key={id} onClick={() => setSubTab(id)}
             className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-semibold transition-colors ${
               subTab === id ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
@@ -124,7 +186,13 @@ export default function HvStatsSync() {
           setShowLog={setShowLog} allPlayers={allPlayers} aliases={aliases}
           resolutions={resolutions} setResolutions={setResolutions}
           saving={saving} saved={saved}
-          onRun={runSync} onSaveAlias={handleSaveAlias}
+          onMasterSync={runMasterSync}
+          onRun={runSync}
+          onLadderSync={runLadderSync}
+          onPlayerStatsSync={runPlayerStatsSync}
+          ladderPhase={ladderPhase}
+          playerStatsPhase={playerStatsPhase}
+          onSaveAlias={handleSaveAlias}
           onDeleteAlias={handleDeleteAlias} onReloadAliases={loadAliases}
         />
       )}
@@ -141,7 +209,11 @@ export default function HvStatsSync() {
 
 function SyncPanel({ phase, log, unmatched, showLog, setShowLog, allPlayers, aliases,
                      resolutions, setResolutions, saving, saved,
-                     onRun, onSaveAlias, onDeleteAlias, onReloadAliases }) {
+                     onMasterSync, onRun, onLadderSync, onPlayerStatsSync,
+                     ladderPhase, playerStatsPhase,
+                     onSaveAlias, onDeleteAlias, onReloadAliases }) {
+
+  const isBusy = phase === 'running' || ladderPhase === 'running' || playerStatsPhase === 'running'
 
   // Parse scraped match summary from log lines
   const scrapedMatches = []
@@ -155,26 +227,38 @@ function SyncPanel({ phase, log, unmatched, showLog, setShowLog, allPlayers, ali
 
   return (
     <>
-      {/* Run button */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 flex items-center gap-3 flex-wrap">
-        <button onClick={onRun} disabled={phase === 'running'}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
-            phase === 'running' ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'
-          }`}>
-          <RefreshCw size={14} className={phase === 'running' ? 'animate-spin' : ''} />
-          {phase === 'running' ? 'Syncing…' : 'Run HV Sync'}
-        </button>
-        {phase === 'done'    && <span className="text-xs text-green-600 font-medium flex items-center gap-1"><Check size={13}/>Sync complete</span>}
-        {phase === 'error'   && <span className="text-xs text-red-500 font-medium">Sync failed</span>}
-        {phase === 'done' && unmatched.length === 0 && (
-          <span className="text-xs text-slate-400">All names matched ✓</span>
-        )}
-        {log.length > 0 && (
-          <button onClick={() => setShowLog(v => !v)}
-            className="ml-auto text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1">
-            Log {showLog ? <ChevronUp size={12}/> : <ChevronDown size={12}/>}
+      {/* ── Master sync button ── */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <button onClick={onMasterSync} disabled={isBusy}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+              isBusy ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'
+            }`}>
+            <Zap size={14} className={isBusy ? 'animate-pulse' : ''} />
+            {isBusy ? 'Syncing…' : 'Master Sync'}
           </button>
-        )}
+          <span className="text-xs text-slate-400">Results · Fixtures · Player stats · Digest · Ladder</span>
+          {log.length > 0 && (
+            <button onClick={() => setShowLog(v => !v)}
+              className="ml-auto text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1">
+              Log {showLog ? <ChevronUp size={12}/> : <ChevronDown size={12}/>}
+            </button>
+          )}
+        </div>
+
+        {/* Master sync status */}
+        <div className="flex items-center gap-4 flex-wrap">
+          <SyncStatus label="Results & Digest" phase={phase} />
+          <SyncStatus label="Ladder" phase={ladderPhase} />
+        </div>
+
+        {/* Individual sync buttons */}
+        <div className="border-t border-slate-100 pt-3 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-slate-400 font-medium mr-1">Individual:</span>
+          <IndividualSyncBtn label="Results & Digest" phase={phase}     disabled={isBusy} onClick={onRun} />
+          <IndividualSyncBtn label="Player Stats"     phase={playerStatsPhase} disabled={isBusy} onClick={onPlayerStatsSync} />
+          <IndividualSyncBtn label="Ladder"           phase={ladderPhase}      disabled={isBusy} onClick={onLadderSync} />
+        </div>
       </div>
 
       {/* Log */}
@@ -224,6 +308,39 @@ function SyncPanel({ phase, log, unmatched, showLog, setShowLog, allPlayers, ali
       {/* Alias manager */}
       <AliasManager aliases={aliases} allPlayers={allPlayers} onDelete={onDeleteAlias} onReload={onReloadAliases} />
     </>
+  )
+}
+
+// ── SyncStatus — small inline status indicator ────────────────────────────────
+function SyncStatus({ label, phase }) {
+  if (phase === 'idle') return null
+  return (
+    <span className={`text-xs font-medium flex items-center gap-1 ${
+      phase === 'running' ? 'text-blue-500' :
+      phase === 'done'    ? 'text-green-600' : 'text-red-500'
+    }`}>
+      {phase === 'running' && <RefreshCw size={11} className="animate-spin" />}
+      {phase === 'done'    && <Check size={11} />}
+      {phase === 'error'   && '✕ '}
+      {label}: {phase === 'running' ? 'syncing…' : phase === 'done' ? 'done' : 'failed'}
+    </span>
+  )
+}
+
+// ── IndividualSyncBtn — small secondary button ────────────────────────────────
+function IndividualSyncBtn({ label, phase, disabled, onClick }) {
+  return (
+    <button onClick={onClick} disabled={disabled || phase === 'running'}
+      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+        phase === 'done'    ? 'border-green-300 text-green-600 bg-green-50' :
+        phase === 'error'   ? 'border-red-300 text-red-500 bg-red-50' :
+        phase === 'running' ? 'border-slate-200 text-slate-400 bg-slate-50 cursor-not-allowed' :
+        disabled            ? 'border-slate-200 text-slate-300 cursor-not-allowed' :
+        'border-slate-200 text-slate-600 bg-white hover:border-blue-300 hover:text-blue-600'
+      }`}>
+      <RefreshCw size={10} className={phase === 'running' ? 'animate-spin' : ''} />
+      {phase === 'done' ? `${label} ✓` : phase === 'error' ? `${label} ✕` : label}
+    </button>
   )
 }
 
