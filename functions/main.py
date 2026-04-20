@@ -523,8 +523,14 @@ def sync_player_stats(db, info):
 
     rounds_snap2 = db.collection('rounds').stream()
     for round_doc in rounds_snap2:
-        if round_doc.to_dict().get('roundType') != 'season':
+        round_data2 = round_doc.to_dict()
+        if round_data2.get('roundType') != 'season':
             continue
+
+        # Use satDate as canonical match date (falls back to sunDate).
+        # Keeps tiebreakers chronologically correct even when round numbers
+        # are out of calendar order (e.g. midweek rounds 19-20).
+        match_date = round_data2.get('satDate') or round_data2.get('sunDate') or ''
 
         matches_snap2 = db.collection('rounds').document(round_doc.id)\
                           .collection('matches').stream()
@@ -543,15 +549,26 @@ def sync_player_stats(db, info):
                         'goals': 0, 'greenCards': 0, 'yellowCards': 0,
                         'redCards': 0, 'gk': 0, 'ets': 0,
                         'gamesPerTeam': {},
+                        'lastGoalDate': '',
+                        'lastCardDate': '',
                     }
                 t = totals[pid]
-                t['goals']       += ps.get('goals', 0)
+                goals_this = ps.get('goals', 0)
+                cards_this = (ps.get('greenCards', 0) +
+                              ps.get('yellowCards', 0) +
+                              ps.get('redCards', 0))
+                t['goals']       += goals_this
                 t['greenCards']  += ps.get('greenCards', 0)
                 t['yellowCards'] += ps.get('yellowCards', 0)
                 t['redCards']    += ps.get('redCards', 0)
                 t['gk']          += ps.get('gk', 0)
                 t['ets']         += ps.get('ets', 0)
                 t['gamesPerTeam'][team_id] = t['gamesPerTeam'].get(team_id, 0) + 1
+                # Track most recent match date where player scored / got carded
+                if goals_this > 0 and match_date > t['lastGoalDate']:
+                    t['lastGoalDate'] = match_date
+                if cards_this > 0 and match_date > t['lastCardDate']:
+                    t['lastCardDate'] = match_date
 
     info(f'   Writing totals for {len(totals)} player(s)...')
 
@@ -567,12 +584,14 @@ def sync_player_stats(db, info):
         player_ref = db.collection('players').document(str(player_id))
         batch.set(player_ref, {
             'stats2026': {
-                'goals':       t['goals'],
-                'greenCards':  t['greenCards'],
-                'yellowCards': t['yellowCards'],
-                'redCards':    t['redCards'],
+                'goals':         t['goals'],
+                'greenCards':    t['greenCards'],
+                'yellowCards':   t['yellowCards'],
+                'redCards':      t['redCards'],
                 'gkAppearances': t['gk'],
-                'ets':         t['ets'],
+                'ets':           t['ets'],
+                'lastGoalDate':  t['lastGoalDate'],
+                'lastCardDate':  t['lastCardDate'],
             },
             'gamesPlayed2026':   games_per_team,
             'teamsPlayed2026':   teams_played,
@@ -725,7 +744,11 @@ def _build_leaders(db):
 
         goals = s.get('goals', 0)
         if goals > 0:
-            scorers.append({'name': name, 'goals': goals})
+            scorers.append({
+                'name': name,
+                'goals': goals,
+                'lastGoalDate': s.get('lastGoalDate', ''),
+            })
 
         green  = s.get('greenCards', 0)
         yellow = s.get('yellowCards', 0)
@@ -742,29 +765,51 @@ def _build_leaders(db):
                 'total': total,
                 'cardPoints': card_points,
                 'green': green, 'yellow': yellow, 'red': red,
+                'lastCardDate': s.get('lastCardDate', ''),
             })
 
-    scorers.sort(key=lambda x: x['goals'], reverse=True)
-    hackers.sort(
-        key=lambda x: (
-            -x['cardPoints'],  # weighted severity score
-            -x['yellow'],      # favor more yellows on ties
-            -x['red'],         # then reds
-            -x['green'],       # then greens
-            x['name'].lower()  # stable alphabetical final tie-break
-        )
-    )
+    scorers.sort(key=lambda x: (
+        -x['goals'],
+        tuple(-ord(c) for c in x['lastGoalDate'].ljust(10)) if x['lastGoalDate'] else (0,),
+        x['name'].lower(),
+    ))
+    # Fix: descending date means we negate — use reverse trick via string comparison
+    # Sort scorers: most goals first, then most recent goal date, then alpha
+    scorers.sort(key=lambda x: (
+        -x['goals'],
+        tuple(-ord(c) for c in x['lastGoalDate'].ljust(10)) if x['lastGoalDate'] else (0,),
+        x['name'].lower(),
+    ))
 
-    def _top_n_with_ties(lst, key, n=5):
-        """Return top-n entries, extending to include all ties at the cut-off position."""
+    hackers.sort(key=lambda x: (
+        -x['cardPoints'],
+        -x['yellow'],
+        -x['red'],
+        -x['green'],
+        tuple(-ord(c) for c in x['lastCardDate'].ljust(10)) if x['lastCardDate'] else (0,),
+        x['name'].lower(),
+    ))
+
+    def _split_top_n(lst, n=5):
+        """
+        Return (top, also) where top = first n entries and also = remainder
+        that are tied with the last entry in top (same score as position n).
+        If the list has <= n entries, also is always empty.
+        """
         if not lst:
-            return []
-        cutoff = lst[n - 1][key] if len(lst) >= n else lst[-1][key]
-        return [p for p in lst if p[key] >= cutoff]
+            return [], []
+        top  = lst[:n]
+        rest = lst[n:]
+        return top, rest
+
+    top_scorers, also_scorers = _split_top_n(scorers)
+    top_hackers, also_hackers = _split_top_n(hackers)
 
     return {
-        'scorers': _top_n_with_ties(scorers, 'goals'),
-        'hackers': _top_n_with_ties(hackers, 'cardPoints'),
+        'scorers':      top_scorers,
+        'scorers_also': also_scorers,
+        'hackers':      top_hackers,
+        'hackers_also': also_hackers,
     }
 
 
@@ -773,7 +818,9 @@ def format_text(summaries, leaders=None):
     today = date.today().strftime('%d %b %Y')
     lines = [
         'Mentone Hockey Club - Weekly Update',
-        'Week of ' + today, '',
+        'Week ending ' + today,
+        'Please keep your unavailability up to date: https://docs.google.com/spreadsheets/d/1MWl3gvFFzniLRFACXHmzPzsAQRIYJsMPlSlnNKh4-p8/edit?usp=sharing',
+        '',
         SEP, 'RESULTS', SEP,
     ]
     for s in summaries:
@@ -810,20 +857,36 @@ def format_text(summaries, leaders=None):
                 scorer_parts.append(f"{i}. {p['name']} — {p['goals']}")
             lines.append('Top Scorers:')
             lines += scorer_parts
+            also = leaders.get('scorers_also', [])
+            if also:
+                from collections import defaultdict
+                by_goals = defaultdict(list)
+                for p in also:
+                    by_goals[p['goals']].append(p['name'])
+                for goals_val in sorted(by_goals.keys(), reverse=True):
+                    names_str = ', '.join(by_goals[goals_val])
+                    lines.append(f"Also on {goals_val} goal{'s' if goals_val != 1 else ''}: {names_str}")
 
         if leaders.get('hackers'):
             lines.append('')
             hacker_parts = []
             for i, p in enumerate(leaders['hackers'], 1):
                 card_detail = []
-                if p['green']:  card_detail.append(f"{p['green']}G")
-                if p['yellow']: card_detail.append(f"{p['yellow']}Y")
-                if p['red']:    card_detail.append(f"{p['red']}R")
+                card_detail += ['Y'] * p['yellow']
+                card_detail += ['G'] * p['green']
+                card_detail += ['R'] * p['red']
                 hacker_parts.append(
-                    f"{i}. {p['name']} — {p['total']} ({', '.join(card_detail)})"
+                    f"{i}. {p['name']} ({' '.join(card_detail)})"
                 )
-            lines.append('Most Cards:')
+            lines.append('Cards of Shame:')
             lines += hacker_parts
+            also = leaders.get('hackers_also', [])
+            if also:
+                also_strs = []
+                for p in also:
+                    badges = ['Y'] * p['yellow'] + ['G'] * p['green'] + ['R'] * p['red']
+                    also_strs.append(f"{p['name']} ({' '.join(badges)})")
+                lines.append('Also: ' + ', '.join(also_strs))
 
     return '\n'.join(lines)
 
@@ -858,9 +921,15 @@ def format_html(summaries, leaders=None):
     next_rounds    = [s['next_fixture']['round'] for s in summaries if s.get('next_fixture')]
     next_round_num = next_rounds[0] if next_rounds else None
 
+    UNAVAIL_URL = ('https://docs.google.com/spreadsheets/d/'
+                   '1MWl3gvFFzniLRFACXHmzPzsAQRIYJsMPlSlnNKh4-p8/edit?usp=sharing')
+
     parts = [f'<div style="{S["wrap"]}">',
              f'<p style="{S["h1"]}">Mentone Hockey Club — Weekly Update</p>',
-             f'<p style="{S["sub"]}">Week of {today}</p>',
+             f'<p style="{S["sub"]}">Week ending {today}</p>',
+             f'<p style="font-size:12px;color:#64748b;margin:0 0 12px 0;">'
+             f'Please keep your unavailability up to date: '
+             f'<a href="{UNAVAIL_URL}" style="color:#1d4ed8;">Unavailability Tracker</a></p>',
              f'<hr style="{S["rule"]}">',
              f'<p style="{S["section"]}">Results</p>']
 
@@ -906,7 +975,7 @@ def format_html(summaries, leaders=None):
             '<p style="%s">Season Leaders</p>' % S['section'],
         ]
 
-        # Top scorers table
+        # ── Top Scorers table ─────────────────────────────────────────────────
         if leaders.get('scorers'):
             parts.append('<p style="font-size:12px;font-weight:bold;color:#475569;margin:0 0 4px 0;">Top Scorers</p>')
             rows_html = ''
@@ -920,20 +989,43 @@ def format_html(summaries, leaders=None):
                     f'</tr>'
                 )
             parts.append(
-                f'<table style="border-collapse:collapse;width:100%;margin-bottom:12px;">'
+                f'<table style="border-collapse:collapse;width:100%;margin-bottom:4px;">'
                 f'{rows_html}</table>'
             )
+            # "Also on X goals" footer — names of players beyond top 5
+            also = leaders.get('scorers_also', [])
+            if also:
+                # Group by goal count (there may be multiple tail values)
+                from collections import defaultdict
+                by_goals = defaultdict(list)
+                for p in also:
+                    by_goals[p['goals']].append(p['name'])
+                also_lines = []
+                for goals_val in sorted(by_goals.keys(), reverse=True):
+                    names_str = ', '.join(by_goals[goals_val])
+                    also_lines.append(
+                        f'Also on {goals_val} goal{"s" if goals_val != 1 else ""}: {names_str}'
+                    )
+                also_text = ' &nbsp;·&nbsp; '.join(also_lines)
+                parts.append(
+                    f'<p style="font-size:11px;color:#94a3b8;font-style:italic;margin:0 0 12px 0;">'
+                    f'{also_text}</p>'
+                )
+            else:
+                parts.append('<div style="margin-bottom:12px;"></div>')
 
-        # Top cards table
+        # ── Cards of Shame table ──────────────────────────────────────────────
         if leaders.get('hackers'):
-            parts.append('<p style="font-size:12px;font-weight:bold;color:#475569;margin:0 0 4px 0;">Most Cards</p>')
+            parts.append('<p style="font-size:12px;font-weight:bold;color:#475569;margin:0 0 4px 0;">Cards of Shame</p>')
             rows_html = ''
             for i, p in enumerate(leaders['hackers'], 1):
                 bg = '#f8fafc' if i % 2 == 0 else '#ffffff'
+                # Build individual card badges — one per card, e.g. Y Y G not Y2 G1
                 card_badges = ''
-                if p['green']:  card_badges += f'<span style="{S["card_g"]}">G&nbsp;{p["green"]}</span> '
-                if p['yellow']: card_badges += f'<span style="{S["card_y"]}">Y&nbsp;{p["yellow"]}</span> '
-                if p['red']:    card_badges += f'<span style="{S["card_r"]}">R&nbsp;{p["red"]}</span>'
+                card_badges += (f'<span style="{S["card_y"]}">Y</span> ' * p['yellow'])
+                card_badges += (f'<span style="{S["card_g"]}">G</span> ' * p['green'])
+                card_badges += (f'<span style="{S["card_r"]}">R</span> ' * p['red'])
+                card_badges = card_badges.strip()
                 rows_html += (
                     f'<tr style="background:{bg};">'
                     f'<td style="padding:3px 6px;color:#94a3b8;font-size:12px;width:18px;">{i}</td>'
@@ -942,9 +1034,24 @@ def format_html(summaries, leaders=None):
                     f'</tr>'
                 )
             parts.append(
-                f'<table style="border-collapse:collapse;width:100%;margin-bottom:8px;">'
+                f'<table style="border-collapse:collapse;width:100%;margin-bottom:4px;">'
                 f'{rows_html}</table>'
             )
+            # "Also" footer for cards — show name + their badges inline
+            also = leaders.get('hackers_also', [])
+            if also:
+                also_parts = []
+                for p in also:
+                    badges = ''
+                    badges += (f'<span style="{S["card_y"]}">Y</span> ' * p['yellow'])
+                    badges += (f'<span style="{S["card_g"]}">G</span> ' * p['green'])
+                    badges += (f'<span style="{S["card_r"]}">R</span> ' * p['red'])
+                    also_parts.append(f'{p["name"]} {badges.strip()}')
+                also_html = ' &nbsp;·&nbsp; '.join(also_parts)
+                parts.append(
+                    f'<p style="font-size:11px;color:#94a3b8;font-style:italic;margin:0 0 8px 0;">'
+                    f'Also: {also_html}</p>'
+                )
 
     parts.append('</div>')
     return '\n'.join(parts)

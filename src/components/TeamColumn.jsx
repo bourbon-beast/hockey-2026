@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { ArrowUpDown, AlertTriangle, MapPin, MessageSquare } from 'lucide-react'
+import { ArrowUpDown, AlertTriangle, MapPin, MessageSquare, MessageSquareText } from 'lucide-react'
 import { AVAILABILITY, POSITIONS, POSITION_STYLES } from './roundUtils'
 import { checkClash } from '../kitClashes'
 
@@ -361,7 +361,7 @@ export default function TeamColumn({
                                         return <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cls}`} title={tip} />
                                     })()}
                                     {isDupe && <span className="text-xs bg-orange-100 text-orange-600 px-1 rounded font-bold flex-shrink-0">DU</span>}
-                                    {/* Note icon — lit up yellow if note exists */}
+                                    {/* Note icon — elevated badge style when note exists */}
                                     <div className="relative flex-shrink-0">
                                         <button
                                             ref={el => { if (el) el._selId = sel.id }}
@@ -370,11 +370,15 @@ export default function TeamColumn({
                                             title={sel.note || 'Add note'}
                                             className={`flex items-center justify-center rounded transition-colors ${
                                                 sel.note
-                                                    ? 'text-yellow-500 hover:text-yellow-600'
-                                                    : 'text-slate-300 hover:text-slate-500'
+                                                    ? 'w-5 h-5 bg-yellow-400 text-white shadow-sm hover:bg-yellow-500'
+                                                    : 'w-5 h-5 text-slate-300 hover:text-slate-500'
                                             }`}
                                         >
-                                            <MessageSquare size={13} strokeWidth={2} />
+                                            {sel.note ? (
+                                                <MessageSquareText size={12} strokeWidth={2.2} />
+                                            ) : (
+                                                <MessageSquare size={13} strokeWidth={2} />
+                                            )}
                                         </button>
                                         {noteOpenId === sel.id && (
                                             <NotePopover
