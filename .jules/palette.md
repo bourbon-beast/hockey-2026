@@ -1,0 +1,3 @@
+## 2024-05-20 - Adding focus states to icon-only buttons
+**Learning:** Icon-only buttons often miss context for screen readers and keyboard users if they are not explicitly styled with `focus-visible`. Also, elements that appear on hover must also appear on focus (`focus-visible:opacity-100`), otherwise they are completely inaccessible to keyboard users.
+**Action:** When adding ARIA labels to buttons, especially icon-only or hover-revealed ones, ensure `focus-visible:ring-2` (and optionally `focus-visible:ring-offset-1` and `p-0.5`) is included. Always pair `group-hover:opacity-100` with `focus-visible:opacity-100` for accessibility.
