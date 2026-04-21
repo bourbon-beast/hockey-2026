@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { ArrowUpDown, AlertTriangle, MapPin, MessageSquare, MessageSquareText } from 'lucide-react'
 import { AVAILABILITY, POSITIONS, POSITION_STYLES } from './roundUtils'
-import { checkClash } from '../kitClashes'
+import { checkClash } from '../utils'
 
 // ── Note Popover ─────────────────────────────────────────────────────────────
 // Renders fixed to viewport so it escapes overflow:hidden on the team column
