@@ -154,7 +154,7 @@ export default function UnavailabilityManager({ onSelectPlayer }) {
           <span className="flex-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Name</span>
           <span className="w-8 text-center text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Sat</span>
           <span className="w-8 text-center text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Sun</span>
-          <span className="w-3" />
+          <span className="w-4" />
         </div>
 
         {/* ── Player rows ── */}
@@ -186,9 +186,12 @@ export default function UnavailabilityManager({ onSelectPlayer }) {
                 >Sun</button>
                 <button
                   onClick={() => removeEntry(player.id, rid)}
-                  className="w-3 text-slate-200 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 text-xs leading-none"
+                  aria-label={`Remove ${player.name} from unavailability`}
+                  className="w-4 text-slate-200 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:outline-none p-0.5 rounded text-xs leading-none"
                   title="Remove"
-                >×</button>
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
               </div>
             )
           })}
