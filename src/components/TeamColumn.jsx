@@ -178,6 +178,7 @@ export default function TeamColumn({
                         {/* Sort mode toggle — mobile only */}
                         <button
                             onClick={() => setSortMode(m => !m)}
+                            aria-label={sortMode ? 'Exit sort mode' : 'Sort players'}
                             className={`sm:hidden w-7 h-7 flex items-center justify-center rounded transition-colors flex-shrink-0
                                 ${sortMode ? 'bg-yellow-400 text-slate-900' : 'bg-white/10 text-white/60 hover:bg-white/20'}`}
                             title={sortMode ? 'Exit sort mode' : 'Sort players'}
@@ -319,11 +320,13 @@ export default function TeamColumn({
                                         <button
                                             onClick={() => idx > 0 && actions.moveSelectionByIndex(team.id, idx, idx - 1)}
                                             disabled={idx === 0}
+                                            aria-label={`Move ${sel.name} up`}
                                             className="w-8 h-7 flex items-center justify-center rounded text-slate-500 hover:text-blue-600 hover:bg-blue-100 disabled:opacity-20 transition-colors font-bold text-base"
                                         >↑</button>
                                         <button
                                             onClick={() => idx < selections.length - 1 && actions.moveSelectionByIndex(team.id, idx, idx + 1)}
                                             disabled={idx === selections.length - 1}
+                                            aria-label={`Move ${sel.name} down`}
                                             className="w-8 h-7 flex items-center justify-center rounded text-slate-500 hover:text-blue-600 hover:bg-blue-100 disabled:opacity-20 transition-colors font-bold text-base"
                                         >↓</button>
                                     </div>
@@ -346,6 +349,7 @@ export default function TeamColumn({
 
                                 <span className="text-slate-400 text-xs w-4 text-center flex-shrink-0">{idx + 1}</span>
                                 <button onClick={() => actions.toggleConfirmed(team.id, sel.player_id)} title={avail.title}
+                                    aria-label={`${avail.title} for ${sel.name}`}
                                     className={`w-5 h-5 rounded-full border-2 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${avail.bg} ${avail.border}`}>
                                     {avail.icon}
                                 </button>
@@ -368,6 +372,7 @@ export default function TeamColumn({
                                             onClick={e => setNoteOpenId(noteOpenId === sel.id ? null : sel.id)}
                                             data-note-btn={sel.id}
                                             title={sel.note || 'Add note'}
+                                            aria-label={`Notes for ${sel.name}`}
                                             className={`flex items-center justify-center rounded transition-colors ${
                                                 sel.note
                                                     ? 'w-5 h-5 bg-yellow-400 text-white shadow-sm hover:bg-yellow-500'
@@ -398,6 +403,7 @@ export default function TeamColumn({
                                     </select>
                                 )}
                                 <button onClick={() => actions.removePlayer(team.id, sel.player_id)}
+                                    aria-label={`Remove ${sel.name} from squad`}
                                     className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
                                     <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                                         <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
@@ -458,8 +464,10 @@ export default function TeamColumn({
                             </span>
                         </div>
                         <button onClick={() => actions.markSelectionUnavailable(team.id, sel.player_id, false)}
+                            aria-label={`Move ${sel.name} to squad`}
                             className="text-slate-400 hover:text-blue-500 text-xs sm:opacity-0 sm:group-hover:opacity-100 flex-shrink-0">↑ squad</button>
                         <button onClick={() => actions.removePlayer(team.id, sel.player_id)}
+                            aria-label={`Remove ${sel.name} from squad`}
                             className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
                             <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                                 <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
