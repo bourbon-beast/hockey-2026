@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Clock, MapPin, ChevronDown, Copy, Check } from 'lucide-react'
+import DOMPurify from 'dompurify'
 import { getRounds, getRoundMatches, getDigestHistory } from '../db'
 
 // ── Team display names ────────────────────────────────────────────────────────
@@ -413,7 +414,8 @@ function DigestPanel() {
         <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
           {selected.html
             ? <div className="p-4 text-sm leading-relaxed"
-                   dangerouslySetInnerHTML={{ __html: selected.html }} />
+                   // Sanitize external HTML from Firestore to prevent XSS
+                   dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.html) }} />
             : <pre className="p-4 text-sm text-slate-700 whitespace-pre-wrap font-sans leading-relaxed">
                 {selected.text}
               </pre>

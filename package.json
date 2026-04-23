@@ -12,6 +12,7 @@
     "deploy:uat": "vite build --mode uat && firebase deploy --only hosting:uat --project uat"
   },
   "dependencies": {
+    "dompurify": "^3.4.1",
     "firebase": "^12.11.0",
     "lucide-react": "^1.7.0",
     "react": "^18.2.0",
