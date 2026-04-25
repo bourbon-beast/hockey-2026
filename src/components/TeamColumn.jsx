@@ -398,8 +398,9 @@ export default function TeamColumn({
                                     </select>
                                 )}
                                 <button onClick={() => actions.removePlayer(team.id, sel.player_id)}
-                                    className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                    aria-label={`Remove ${sel.name} from squad`}
+                                    className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0 p-0.5 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none rounded">
+                                    <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                                         <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
                                     </svg>
                                 </button>
@@ -458,10 +459,12 @@ export default function TeamColumn({
                             </span>
                         </div>
                         <button onClick={() => actions.markSelectionUnavailable(team.id, sel.player_id, false)}
-                            className="text-slate-400 hover:text-blue-500 text-xs sm:opacity-0 sm:group-hover:opacity-100 flex-shrink-0">↑ squad</button>
+                            aria-label={`Move ${sel.name} back to squad`}
+                            className="text-slate-400 hover:text-blue-500 text-xs sm:opacity-0 sm:group-hover:opacity-100 flex-shrink-0 p-0.5 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none rounded">↑ squad</button>
                         <button onClick={() => actions.removePlayer(team.id, sel.player_id)}
-                            className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                            aria-label={`Remove ${sel.name} from squad`}
+                            className="text-slate-300 hover:text-red-500 transition-colors flex-shrink-0 p-0.5 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none rounded">
+                            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                                 <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
                             </svg>
                         </button>
