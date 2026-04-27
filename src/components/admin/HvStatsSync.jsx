@@ -31,6 +31,7 @@ export default function HvStatsSync() {
   const [resolutions, setResolutions] = useState({})
   const [saving, setSaving]           = useState({})
   const [saved, setSaved]             = useState({})
+  const [weeklyNotes, setWeeklyNotes] = useState('')
   // Individual sync states
   const [ladderPhase, setLadderPhase]           = useState('idle')
   const [playerStatsPhase, setPlayerStatsPhase] = useState('idle')
@@ -69,6 +70,7 @@ export default function HvStatsSync() {
       const res  = await fetch(SYNC_HV_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}) },
+        body: JSON.stringify({ weeklyNotes: weeklyNotes.trim() || undefined }),
       })
       const data = await res.json()
       const rawLog = data.log || []
@@ -95,6 +97,7 @@ export default function HvStatsSync() {
   const runMasterSync = async () => {
     setPhase('running'); setLadderPhase('running')
     setLog([]); setUnmatched([]); setSaved({}); setResolutions({})
+    console.log(SYNC_HV_URL)
     try {
       // Step 1: Ladder sync first so hvSync/ladders is fresh for the digest
       const ladderData = await _callSync(SYNC_LADDER_URL)
@@ -102,7 +105,13 @@ export default function HvStatsSync() {
       if (!ladderData.ok) { setPhase('idle'); return }
 
       // Step 2: HV sync (results, fixtures, player stats, digest — reads fresh ladder)
-      const hvData = await _callSync(SYNC_HV_URL)
+      const idToken = await auth.currentUser?.getIdToken()
+      const hvRes = await fetch(SYNC_HV_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}) },
+        body: JSON.stringify({ weeklyNotes: weeklyNotes.trim() || undefined }),
+      })
+      const hvData = await hvRes.json()
       const rawLog       = hvData.log || []
       const rawUnmatched = (hvData.unmatchedHvNames || []).filter(n => n && n.trim() && n !== 'Fill-ins')
       setLog(rawLog)
@@ -194,6 +203,7 @@ export default function HvStatsSync() {
           playerStatsPhase={playerStatsPhase}
           onSaveAlias={handleSaveAlias}
           onDeleteAlias={handleDeleteAlias} onReloadAliases={loadAliases}
+          weeklyNotes={weeklyNotes} setWeeklyNotes={setWeeklyNotes}
         />
       )}
 
@@ -211,7 +221,8 @@ function SyncPanel({ phase, log, unmatched, showLog, setShowLog, allPlayers, ali
                      resolutions, setResolutions, saving, saved,
                      onMasterSync, onRun, onLadderSync, onPlayerStatsSync,
                      ladderPhase, playerStatsPhase,
-                     onSaveAlias, onDeleteAlias, onReloadAliases }) {
+                     onSaveAlias, onDeleteAlias, onReloadAliases,
+                     weeklyNotes, setWeeklyNotes }) {
 
   const isBusy = phase === 'running' || ladderPhase === 'running' || playerStatsPhase === 'running'
 
@@ -227,6 +238,23 @@ function SyncPanel({ phase, log, unmatched, showLog, setShowLog, allPlayers, ali
 
   return (
     <>
+      {/* ── Weekly notes ── */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
+        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide block">
+          Weekly notes <span className="text-slate-400 font-normal normal-case">(optional — added to top of digest)</span>
+        </label>
+        <textarea
+          value={weeklyNotes}
+          onChange={e => setWeeklyNotes(e.target.value)}
+          disabled={isBusy}
+          placeholder="e.g. Ned scored his first goal! Also a magical slide tackle from Tom…"
+          rows={3}
+          className="w-full text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg
+                     px-3 py-2 resize-none focus:outline-none focus:border-blue-400 focus:ring-1
+                     focus:ring-blue-100 placeholder-slate-400 disabled:opacity-50"
+        />
+      </div>
+
       {/* ── Master sync button ── */}
       <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
         <div className="flex items-center gap-3 flex-wrap">

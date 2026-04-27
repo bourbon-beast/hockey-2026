@@ -22,6 +22,10 @@ export function useRoundManager() {
     const touchScrollRAF = useRef(null)
     const unsubscribeSelectionsRef = useRef(null)   // live listener cleanup
     const unsubscribeUnavailRef    = useRef(null)   // live unavailability listener cleanup
+    const allPlayersRef            = useRef([])     // always-current player map for snapshot callbacks
+
+    // Keep allPlayersRef current so snapshot callbacks always see the latest players
+    useEffect(() => { allPlayersRef.current = allPlayers }, [allPlayers])
 
     useEffect(() => {
         Promise.all([
@@ -78,13 +82,14 @@ export function useRoundManager() {
 
         // Live listener on selections subcollection
         const selectionsRef = collection(db, 'rounds', String(currentRound.id), 'selections')
-        const playerMap = {}
-        allPlayers.forEach(p => { playerMap[String(p.id)] = p })
 
         unsubscribeSelectionsRef.current = onSnapshot(selectionsRef, (snap) => {
+            // Build a fresh playerMap from the ref so newly-created players are included
+            const currentPlayerMap = {}
+            allPlayersRef.current.forEach(p => { currentPlayerMap[String(p.id)] = p })
             const selections = snap.docs.map(d => {
                 const sel = d.data()
-                const player = playerMap[sel.playerId] || {}
+                const player = currentPlayerMap[sel.playerId] || {}
                 return {
                     id: d.id,
                     round_id: currentRound.id,

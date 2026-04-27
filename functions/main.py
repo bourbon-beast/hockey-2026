@@ -25,7 +25,7 @@ Local test:
 import re
 import sys
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import requests
 from bs4 import BeautifulSoup
@@ -444,7 +444,15 @@ def sync_player_stats(db, info):
     hv_aliases   = _load_hv_aliases(db)
     now_iso      = datetime.utcnow().isoformat() + 'Z'
 
-    # ── Phase 1: scrape any match docs missing statsLastSync ──────────────────
+    # ── Determine rescrape window ─────────────────────────────────────────────
+    # Re-scrape any match played within the last 7 days — captures all late
+    # goal/card entries from the weekend just gone. Older matches are settled.
+    # TODO: add admin endpoint to force-rescrape a specific round by number.
+    today = date.today()
+    rescrape_cutoff = (today - timedelta(days=7)).isoformat()
+    info(f'   🔄 Re-scraping matches since {rescrape_cutoff}')
+
+    # ── Phase 1: scrape recent matches ────────────────────────────────────────
     rounds_snap = db.collection('rounds').stream()
     all_unmatched = []
     scraped = 0
@@ -458,18 +466,16 @@ def sync_player_stats(db, info):
                          .collection('matches').stream()
 
         for match_doc in matches_snap:
-            match_data = match_doc.to_dict()
-            hv_url     = match_data.get('hvGameUrl', '')
-            already    = match_data.get('statsLastSync')
-            has_stats  = bool(match_data.get('playerStats'))
+            match_data  = match_doc.to_dict()
+            hv_url      = match_data.get('hvGameUrl', '')
+            match_date  = match_data.get('matchDate', '')
 
-            # Only scrape played matches with a game URL not yet processed.
-            # Re-scrape if previously synced but got zero players (empty first run).
-            if not hv_url or (already and has_stats):
+            # Only rescrape matches played within the last 7 days
+            if not hv_url or match_date < rescrape_cutoff:
                 continue
 
             team_id = match_doc.id
-            info(f'   Scraping stats: R{round_data.get("roundNumber")} {team_id} — {hv_url}')
+            info(f'   Scraping stats: R{round_data.get("roundNumber")} {team_id} ({match_date}) — {hv_url}')
 
             try:
                 raw_stats = parse_game_stats(hv_url)
@@ -792,15 +798,19 @@ def _build_leaders(db):
 
     def _split_top_n(lst, n=5):
         """
-        Return (top, also) where top = first n entries and also = remainder
-        that are tied with the last entry in top (same score as position n).
-        If the list has <= n entries, also is always empty.
+        Top-n leaderboard: always show exactly the first n entries, then put
+        any entries beyond n that tie with position n into 'also'. Everything
+        with a lower score than position n is dropped entirely.
         """
         if not lst:
             return [], []
+        if len(lst) <= n:
+            return lst, []
+        score_field = 'goals' if 'goals' in lst[0] else 'cardPoints'
+        nth_score = lst[n - 1][score_field]
         top  = lst[:n]
-        rest = lst[n:]
-        return top, rest
+        also = [x for x in lst[n:] if x[score_field] == nth_score]
+        return top, also
 
     top_scorers, also_scorers = _split_top_n(scorers)
     top_hackers, also_hackers = _split_top_n(hackers)
@@ -817,12 +827,14 @@ def _ordinal(n):
     """Return ordinal string for an integer: 1 → '1st', 2 → '2nd' etc."""
     if not n:
         return '—'
-    s = ['th', 'st', 'nd', 'rd']
-    v = n % 100
-    return str(n) + (s[(v - 20) % 10] if (v - 20) % 10 < len(s) else s[v] if v < len(s) else s[0])
+    # 11, 12, 13 are always 'th' regardless of last digit
+    if 11 <= (n % 100) <= 13:
+        return str(n) + 'th'
+    suffixes = {1: 'st', 2: 'nd', 3: 'rd'}
+    return str(n) + suffixes.get(n % 10, 'th')
 
 
-def format_text(summaries, leaders=None, ladder_data=None):
+def format_text(summaries, leaders=None, ladder_data=None, weekly_notes=None):
     SEP = '------------------------------'
     today = date.today().strftime('%d %b %Y')
     last_rounds = [s['last_result']['round'] for s in summaries if s.get('last_result')]
@@ -832,9 +844,11 @@ def format_text(summaries, leaders=None, ladder_data=None):
         title,
         'Week ending ' + today,
         'Please keep your unavailability up to date: https://docs.google.com/spreadsheets/d/1MWl3gvFFzniLRFACXHmzPzsAQRIYJsMPlSlnNKh4-p8/edit?usp=sharing',
-        '',
-        SEP, 'RESULTS', SEP,
     ]
+    # Optional weekly notes — injected as a highlighted block before Results
+    if weekly_notes and weekly_notes.strip():
+        lines += ['', SEP, weekly_notes.strip(), SEP]
+    lines += ['', SEP, 'RESULTS', SEP]
     for s in summaries:
         r = s.get('last_result')
         if s.get('error'):
@@ -915,7 +929,7 @@ def format_text(summaries, leaders=None, ladder_data=None):
 
     return '\n'.join(lines)
 
-def format_html(summaries, leaders=None, ladder_data=None):
+def format_html(summaries, leaders=None, ladder_data=None, weekly_notes=None):
     today = date.today().strftime('%d %b %Y')
     S = {
         'wrap':    'font-family:Arial,sans-serif;font-size:14px;color:#1e293b;max-width:600px;',
@@ -958,8 +972,19 @@ def format_html(summaries, leaders=None, ladder_data=None):
              f'<p style="font-size:12px;color:#64748b;margin:0 0 12px 0;">'
              f'Please keep your unavailability up to date: '
              f'<a href="{UNAVAIL_URL}" style="color:#1d4ed8;">Unavailability Tracker</a></p>',
-             f'<hr style="{S["rule"]}">',
-             f'<p style="{S["section"]}">Results</p>']
+             ]
+    # Optional weekly notes — rendered as a highlighted callout block before Results
+    if weekly_notes and weekly_notes.strip():
+        # Convert plain newlines to <br> so multi-line notes render correctly
+        notes_html = weekly_notes.strip().replace('\n', '<br>')
+        parts.append(
+            f'<div style="background:#eff6ff;border-left:4px solid #1d4ed8;'
+            f'border-radius:4px;padding:10px 14px;margin:0 0 14px 0;">'
+            f'<p style="font-size:13px;color:#1e293b;margin:0;line-height:1.5;">{notes_html}</p>'
+            f'</div>'
+        )
+    parts += [f'<hr style="{S["rule"]}">',
+              f'<p style="{S["section"]}">Results</p>']
 
     for s in summaries:
         r = s.get('last_result')
@@ -1151,6 +1176,15 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
         log.append(msg)
         print(msg)
 
+    # Read optional weekly notes from request body
+    try:
+        body = req.get_json(silent=True) or {}
+        weekly_notes = (body.get('weeklyNotes') or '').strip() or None
+    except Exception:
+        weekly_notes = None
+    if weekly_notes:
+        info(f'📝 Weekly notes provided ({len(weekly_notes)} chars)')
+
     info('📋 Loading round map from Firestore...')
     round_map = load_round_map(db)
     info(f'   {len(round_map)} season rounds loaded')
@@ -1215,6 +1249,14 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
             out[key] = None if g is None else {k: v for k, v in g.items() if k != 'parsed_dt'}
         return out
 
+    # Sync player stats FIRST — scrapes new games and writes fresh stats2026 to players
+    # so that _build_leaders reads up-to-date data for the digest.
+    try:
+        unmatched_names = sync_player_stats(db, info)
+    except Exception as e:
+        info(f'⚠️  Player stats sync failed: {e}')
+        unmatched_names = []
+
     # Build season leaders from updated player stats
     try:
         leaders = _build_leaders(db)
@@ -1232,8 +1274,8 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
         info(f'⚠️  Ladder load failed: {e}')
         ladder_data = {}
 
-    text_output   = format_text(summaries, leaders, ladder_data)
-    html_output   = format_html(summaries, leaders, ladder_data)
+    text_output   = format_text(summaries, leaders, ladder_data, weekly_notes)
+    html_output   = format_html(summaries, leaders, ladder_data, weekly_notes)
     serial_output = [serialise(s) for s in summaries]
 
     # Derive last played round for subject/title
@@ -1245,18 +1287,12 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
     next_round_nums = [s['next_fixture']['round'] for s in summaries if s.get('next_fixture')]
     digest_round    = next_round_nums[0] if next_round_nums else None
 
-    # Sync player stats (scrape new games + recompute totals)
-    try:
-        unmatched_names = sync_player_stats(db, info)
-    except Exception as e:
-        info(f'⚠️  Player stats sync failed: {e}')
-        unmatched_names = []
-
     # Always write hvSync/latest (keeps existing DigestPanel working)
     db.collection('hvSync').document('latest').set({
         'syncedAt': now_iso, 'text': text_output,
         'html': html_output, 'summaries': serial_output,
         'subject': subject,
+        'weeklyNotes': weekly_notes or '',
     })
     info('\n💾 Saved hvSync/latest')
 
@@ -1266,6 +1302,7 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
         db.collection('weeklyDigests').document(doc_id).set({
             'roundNumber': digest_round, 'generatedAt': now_iso,
             'subject': subject,
+            'weeklyNotes': weekly_notes or '',
             'text': text_output, 'html': html_output, 'summaries': serial_output,
         })
         info(f'💾 Saved weeklyDigests/{doc_id}')
