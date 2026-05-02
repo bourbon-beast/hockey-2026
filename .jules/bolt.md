@@ -1,0 +1,3 @@
+## 2025-02-14 - Optimize useRoundManager getters
+**Learning:** The React application suffered from performance degradation during frequent state updates (like drag-and-drop operations) because O(N) array operations (`.filter()`, `.find()`, and `.sort()`) were executed directly inside getter functions that are called frequently during rendering.
+**Action:** Always pre-build O(1) hash maps within a `useMemo` hook based on source data arrays for derived states. Avoid placing O(N) array operations inside render loops or frequently-accessed getter functions to maintain 60fps performance during interactive UI actions.
