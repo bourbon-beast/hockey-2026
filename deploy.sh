@@ -10,13 +10,18 @@
 #   ./deploy.sh --functions --uat  → deploy both Cloud Functions to UAT
 #   ./deploy.sh --fn syncHv  → deploy single function to PROD
 #   ./deploy.sh --fn syncHv --uat  → deploy single function to UAT
-#   ./deploy.sh --rules      → deploy Firestore rules to PROD only
+#   ./deploy.sh --rules      → deploy shared Firestore rules to PROD
+#   ./deploy.sh --rules --uat → deploy shared Firestore rules to UAT
+#
+# Firestore rules are project-wide. The UAT rules are shared with the
+# mentone-fixture app, so only deploy rules after confirming both apps'
+# collection rules are present in firestore.rules.
 
 set -e
 
 ACCOUNT_EMAIL="steve.g.waters@gmail.com"
 DEPLOY_FRONTEND=true
-DEPLOY_RULES=true
+DEPLOY_RULES=false
 DEPLOY_FUNCTIONS=false
 SINGLE_FN=""
 UAT=false
@@ -26,7 +31,7 @@ for arg in "$@"; do
   case $arg in
     --all)       DEPLOY_FRONTEND=true; DEPLOY_FUNCTIONS=true; DEPLOY_RULES=false ;;
     --rules)     DEPLOY_FRONTEND=false; DEPLOY_RULES=true ;;
-    --uat)       UAT=true; DEPLOY_RULES=false ;;
+    --uat)       UAT=true ;;
     --functions) DEPLOY_FRONTEND=false; DEPLOY_RULES=false; DEPLOY_FUNCTIONS=true ;;
     --fn)        DEPLOY_FRONTEND=false; DEPLOY_RULES=false; DEPLOY_FUNCTIONS=true ;;
     syncHv|syncLadder|syncUnavailability|confirmUnavailabilitySync) SINGLE_FN=$arg ;;
@@ -77,10 +82,17 @@ if [ "$DEPLOY_FRONTEND" = true ]; then
   echo ""
 fi
 
-# ── Firestore Rules (prod only) ───────────────────────────────────────
+# ── Firestore Rules (explicit only; shared on UAT) ─────────────────────
 if [ "$DEPLOY_RULES" = true ]; then
-  echo "🔒 Deploying Firestore rules (PROD)..."
-  firebase deploy --only firestore:rules --project prod
+  if [ "$UAT" = true ]; then
+    RULES_PROJECT="uat"
+    echo "🔒 Deploying shared Firestore rules (UAT)..."
+    echo "⚠️  UAT rules are shared with mentone-fixture."
+  else
+    RULES_PROJECT="prod"
+    echo "🔒 Deploying Firestore rules (PROD)..."
+  fi
+  firebase deploy --only firestore:rules --project "$RULES_PROJECT"
   echo "✅ Firestore rules deployed."
   echo ""
 fi

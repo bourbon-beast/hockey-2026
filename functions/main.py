@@ -245,12 +245,59 @@ def parse_team_page(team_url):
 def parse_scorers(game_url):
     """Fetch game detail page, return Mentone scorer strings (legacy — wraps parse_game_stats)."""
     stats = parse_game_stats(game_url)
+    return _format_scorers(stats)
+
+
+def parse_game_digest_stats(game_url):
+    """Fetch game detail page, return scorer strings and card details for the digest."""
+    stats = parse_game_stats(game_url)
+    return {
+        'scorers': _format_scorers(stats),
+        'cards': _format_cards(stats),
+    }
+
+
+def _format_scorers(stats):
     scorers = []
     for p in stats:
         if p['goals'] > 0:
             name = _hv_name_to_display(p['hv_name'])
             scorers.append(name if p['goals'] == 1 else f'{name} ({p["goals"]})')
     return scorers
+
+
+def _format_cards(stats):
+    cards = []
+    for p in stats:
+        green = p.get('green_cards', 0)
+        yellow = p.get('yellow_cards', 0)
+        red = p.get('red_cards', 0)
+        if green + yellow + red <= 0:
+            continue
+        cards.append({
+            'name': _hv_name_to_display(p['hv_name']),
+            'green': green,
+            'yellow': yellow,
+            'red': red,
+        })
+    return cards
+
+
+def _card_letters(card):
+    letters = []
+    letters += ['Y'] * card.get('yellow', 0)
+    letters += ['G'] * card.get('green', 0)
+    letters += ['R'] * card.get('red', 0)
+    return letters
+
+
+def _format_cards_text(cards):
+    parts = []
+    for card in cards or []:
+        letters = _card_letters(card)
+        if letters:
+            parts.append(f"{card['name']} ({' '.join(letters)})")
+    return ', '.join(parts)
 
 
 def _hv_name_to_display(hv_name):
@@ -650,7 +697,7 @@ def _parse_date(date_str):
         return ''
 
 
-def write_result(db, round_doc_id, team_id, game, scorers):
+def write_result(db, round_doc_id, team_id, game, scorers, cards=None):
     """Write result to rounds/{roundDocId}/matches/{teamId}.
     Score always Mentone-first: scoreFor = Mentone, scoreAgainst = opponent."""
     (db.collection('rounds').document(round_doc_id)
@@ -660,6 +707,7 @@ def write_result(db, round_doc_id, team_id, game, scorers):
            'scoreAgainst': game['score_opponent'],
            'result':       game['result'] or '',
            'scorers':      scorers,
+           'cards':        cards or [],
            'hvGameUrl':    game['detail_url'] or '',
            'hvLastSync':   datetime.utcnow().isoformat() + 'Z',
        }, merge=True))
@@ -859,9 +907,11 @@ def format_text(summaries, leaders=None, ladder_data=None, weekly_notes=None):
             continue
         score  = (str(r['score_mentone']) + '-' + str(r['score_opponent'])) if r['score_mentone'] is not None else '--'
         result = r['result'] or 'Not entered'
+        cards  = _format_cards_text(s.get('cards', [])) or '--'
         lines += ['\n' + s['name'] + ' | Round ' + str(r['round']) + ' | ' + result,
                   'Versus: ' + r['opponent'] + '  ' + score,
-                  'Goals:  ' + (', '.join(s.get('scorers', [])) or '--')]
+                  'Goals:  ' + (', '.join(s.get('scorers', [])) or '--'),
+                  'Cards:  ' + cards]
 
     lines += ['', SEP, 'NEXT ROUND', SEP]
     next_round_nums = [s['next_fixture']['round'] for s in summaries if s.get('next_fixture')]
@@ -957,6 +1007,18 @@ def format_html(summaries, leaders=None, ladder_data=None, weekly_notes=None):
         return (f'<tr><td style="{S["label"]}width:70px;padding:1px 8px 1px 0;">{label}</td>'
                 f'<td style="padding:1px 0;">{value}</td></tr>')
 
+    def cards_html(cards):
+        parts = []
+        for card in cards or []:
+            badges = ''
+            badges += (f'<span style="{S["card_y"]}">Y</span> ' * card.get('yellow', 0))
+            badges += (f'<span style="{S["card_g"]}">G</span> ' * card.get('green', 0))
+            badges += (f'<span style="{S["card_r"]}">R</span> ' * card.get('red', 0))
+            badges = badges.strip()
+            if badges:
+                parts.append(f'{card["name"]} {badges}')
+        return ', '.join(parts)
+
     next_rounds    = [s['next_fixture']['round'] for s in summaries if s.get('next_fixture')]
     next_round_num = next_rounds[0] if next_rounds else None
     last_rounds    = [s['last_result']['round'] for s in summaries if s.get('last_result')]
@@ -1001,13 +1063,15 @@ def format_html(summaries, leaders=None, ladder_data=None, weekly_notes=None):
         scorers = s.get('scorers', [])
         opp     = r['opponent']
         goals   = ', '.join(scorers) if scorers else '\u2013'
+        cards   = cards_html(s.get('cards', [])) or '\u2013'
         parts.append(
             '<div style="%s">'
             '<p style="%s">%s &nbsp;&middot;&nbsp; Round %s &nbsp;%s</p>'
-            '<table style="border-collapse:collapse;">%s%s</table></div>'
+            '<table style="border-collapse:collapse;">%s%s%s</table></div>'
             % (S['block'], S['comp'], s['name'], r['round'], badge(result),
                row('Versus:', opp + ' &nbsp; ' + score),
-               row('Goals:', goals))
+               row('Goals:', goals),
+               row('Cards:', cards))
         )
 
     if next_round_num:
@@ -1199,7 +1263,8 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
             info(f'   ❌ Failed: {e}')
             summaries.append({'name': comp['name'], 'short': comp['short'],
                                'team_id': comp['team_id'], 'error': str(e),
-                               'last_result': None, 'next_fixture': None, 'scorers': []})
+                               'last_result': None, 'next_fixture': None,
+                               'scorers': [], 'cards': []})
             continue
 
         played   = sorted([r for r in rounds if r['status'] == 'played'],
@@ -1210,9 +1275,12 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
         next_fixture = upcoming[0] if upcoming else None
 
         scorers = []
+        cards = []
         if last_result and last_result.get('detail_url'):
-            info(f"   ⚽ Fetching scorers for R{last_result['round']}...")
-            scorers = parse_scorers(last_result['detail_url'])
+            info(f"   ⚽ Fetching scorers/cards for R{last_result['round']}...")
+            digest_stats = parse_game_digest_stats(last_result['detail_url'])
+            scorers = digest_stats['scorers']
+            cards = digest_stats['cards']
 
         # Write results for ALL played rounds (not just last) so stats scraper
         # has hvGameUrl available for every game, including older rounds.
@@ -1223,7 +1291,8 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
                 info(f"   ⚠️  R{game['round']} not in round map — skipping")
                 continue
             game_scorers = scorers if game is last_result else []
-            write_result(db, doc_id, comp['team_id'], game, game_scorers)
+            game_cards = cards if game is last_result else []
+            write_result(db, doc_id, comp['team_id'], game, game_scorers, game_cards)
             if game is last_result:
                 info(f"   💾 Written result R{game['round']} {comp['team_id']}: "
                      f"{game['result']} {game['score_mentone']}-{game['score_opponent']}")
@@ -1238,7 +1307,7 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
         summaries.append({
             'name': comp['name'], 'short': comp['short'], 'team_id': comp['team_id'],
             'error': None, 'last_result': last_result,
-            'scorers': scorers, 'next_fixture': next_fixture,
+            'scorers': scorers, 'cards': cards, 'next_fixture': next_fixture,
         })
 
     # Strip non-serialisable fields

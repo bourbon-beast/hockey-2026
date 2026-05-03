@@ -75,6 +75,20 @@ function fmtDate(dateStr, opts) {
   } catch { return '' }
 }
 
+function formatCards(cards = []) {
+  return cards
+    .map(card => {
+      const letters = [
+        ...Array(card.yellow || 0).fill('Y'),
+        ...Array(card.green || 0).fill('G'),
+        ...Array(card.red || 0).fill('R'),
+      ]
+      return letters.length ? `${card.name} (${letters.join(' ')})` : ''
+    })
+    .filter(Boolean)
+    .join(', ')
+}
+
 // ── Result badge ──────────────────────────────────────────────────────────────
 function ResultBadge({ result, scoreFor, scoreAgainst }) {
   if (!result) return null
@@ -105,6 +119,7 @@ function MatchCard({ team, match }) {
     .replace('Hockey Centre', 'HC')
     .replace('Playing Fields', 'Oval')
     .replace('Secondary College', 'SC')
+  const cardText = formatCards(match?.cards)
 
   const handleCopy = async () => {
     const line = formatFixtureLine(team.id, match)
@@ -156,6 +171,11 @@ function MatchCard({ team, match }) {
             {match.scorers?.length > 0 && (
               <div className="text-xs text-slate-400 mt-0.5">
                 Goals: {match.scorers.join(', ')}
+              </div>
+            )}
+            {cardText && (
+              <div className="text-xs text-slate-400 mt-0.5">
+                Cards: {cardText}
               </div>
             )}
           </>

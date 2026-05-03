@@ -741,6 +741,7 @@ export async function getRoundMatches(roundId) {
       score_against: data.scoreAgainst ?? null,
       result:        data.result     || '',
       scorers:       data.scorers    || [],
+      cards:         data.cards      || [],
       is_home:       data.isHome      ?? null,
     }
   })

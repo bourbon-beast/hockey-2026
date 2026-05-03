@@ -200,13 +200,37 @@ def parse_team_page(team_url: str) -> list[dict]:
     return rounds
 
 
-def parse_scorers(game_url: str) -> list[str]:
-    """Fetch game detail page, return Mentone scorer strings e.g. ['First Last', 'Name (2)']"""
+def _hv_name_to_display(name_raw: str) -> str:
+    """Convert '1. Last, First (#7)' or 'Last, First' to 'First Last'."""
+    nm = re.match(r'\d+\.\s*([^(#]+)', name_raw)
+    raw = nm.group(1).strip().rstrip(',').strip() if nm else name_raw.strip()
+    raw = re.sub(r'\s*\(#\d+\)\s*$', '', raw).strip()
+    return (f"{raw.split(',')[1].strip()} {raw.split(',')[0].strip()}"
+            if ',' in raw else raw)
+
+
+def _card_letters(card: dict) -> list[str]:
+    return (['Y'] * card.get('yellow', 0) +
+            ['G'] * card.get('green', 0) +
+            ['R'] * card.get('red', 0))
+
+
+def _format_cards_text(cards: list[dict]) -> str:
+    parts = []
+    for card in cards or []:
+        letters = _card_letters(card)
+        if letters:
+            parts.append(f"{card['name']} ({' '.join(letters)})")
+    return ', '.join(parts)
+
+
+def parse_game_digest_stats(game_url: str) -> dict:
+    """Fetch game detail page, return Mentone scorers and card details."""
     try:
         soup = fetch_soup(game_url)
     except Exception as e:
         print(f"    ⚠️  Couldn't fetch game detail: {e}", file=sys.stderr)
-        return []
+        return {'scorers': [], 'cards': []}
 
     # Match card uses <h5> for team headers
     for h5 in soup.find_all('h5'):
@@ -215,26 +239,44 @@ def parse_scorers(game_url: str) -> list[str]:
             if not table:
                 break
             scorers = []
+            cards = []
             for row in table.find_all('tr')[1:]:
                 cells = row.find_all('td')
                 if len(cells) < 2:
                     continue
-                name_raw  = cells[0].get_text(strip=True)
+                name_cell = cells[0]
+                player_link = name_cell.find('a', href=lambda h: h and '/games/statistics/' in h)
+                if not player_link:
+                    continue
+                name_raw  = name_cell.get_text(strip=True)
                 goals_raw = cells[1].get_text(strip=True)
-                if not (goals_raw and re.match(r'^\d+$', goals_raw)):
-                    continue
-                goals = int(goals_raw)
-                if goals < 1:
-                    continue
-                # Name format: "1. Last, First (#7)" → flip to "First Last"
-                nm = re.match(r'\d+\.\s*([^(#]+)', name_raw)
-                if nm:
-                    raw = nm.group(1).strip().rstrip(',').strip()
-                    name = (f"{raw.split(',')[1].strip()} {raw.split(',')[0].strip()}"
-                            if ',' in raw else raw)
+                name = _hv_name_to_display(name_raw)
+
+                goals = int(goals_raw) if re.match(r'^\d+$', goals_raw or '') else 0
+                if goals > 0:
                     scorers.append(name if goals == 1 else f"{name} ({goals})")
-            return scorers
-    return []
+
+                def _int(idx: int) -> int:
+                    if idx >= len(cells):
+                        return 0
+                    val = cells[idx].get_text(strip=True)
+                    return int(val) if re.match(r'^\d+$', val or '') else 0
+
+                green, yellow, red = _int(2), _int(3), _int(4)
+                if green + yellow + red > 0:
+                    cards.append({
+                        'name': name,
+                        'green': green,
+                        'yellow': yellow,
+                        'red': red,
+                    })
+            return {'scorers': scorers, 'cards': cards}
+    return {'scorers': [], 'cards': []}
+
+
+def parse_scorers(game_url: str) -> list[str]:
+    """Fetch game detail page, return Mentone scorer strings e.g. ['First Last', 'Name (2)']"""
+    return parse_game_digest_stats(game_url)['scorers']
 
 
 # ── Firestore helpers ─────────────────────────────────────────────────────────
@@ -250,7 +292,7 @@ def load_round_map(db) -> dict:
 
 
 def write_result_to_firestore(db, round_doc_id: str, team_id: str, game: dict,
-                               scorers: list[str], dry_run: bool) -> None:
+                               scorers: list[str], cards: list[dict], dry_run: bool) -> None:
     """Write result fields to rounds/{roundDocId}/matches/{teamId}.
     scoreFor/scoreAgainst are always from Mentone's perspective."""
     update = {
@@ -258,6 +300,7 @@ def write_result_to_firestore(db, round_doc_id: str, team_id: str, game: dict,
         'scoreAgainst': game['score_opponent'],
         'result':       game['result'] or '',
         'scorers':      scorers,
+        'cards':        cards or [],
         'hvGameUrl':    game['detail_url'] or '',
         'hvLastSync':   datetime.utcnow().isoformat() + 'Z',
     }
@@ -347,6 +390,7 @@ def format_text(summaries: list[dict]) -> str:
             lines.append(f"Goals:  {', '.join(scorers)}")
         else:
             lines.append("Goals:  --")
+        lines.append(f"Cards:  {_format_cards_text(s.get('cards', [])) or '--'}")
 
     lines += [
         "",
@@ -394,6 +438,12 @@ def format_html(summaries: list[dict]) -> str:
                    'font-weight:bold;color:#fff;background:#dc2626;',
         'badge_d': 'display:inline-block;padding:1px 7px;border-radius:3px;font-size:12px;'
                    'font-weight:bold;color:#fff;background:#ca8a04;',
+        'card_g':  'display:inline-block;padding:0 5px;border-radius:3px;font-size:11px;'
+                   'font-weight:bold;color:#fff;background:#16a34a;',
+        'card_y':  'display:inline-block;padding:0 5px;border-radius:3px;font-size:11px;'
+                   'font-weight:bold;color:#fff;background:#ca8a04;',
+        'card_r':  'display:inline-block;padding:0 5px;border-radius:3px;font-size:11px;'
+                   'font-weight:bold;color:#fff;background:#dc2626;',
     }
 
     def badge(result):
@@ -403,6 +453,18 @@ def format_html(summaries: list[dict]) -> str:
     def row(label, value):
         return (f'<tr><td style="{S["label"]}width:70px;padding:1px 8px 1px 0;">{label}</td>'
                 f'<td style="padding:1px 0;">{value}</td></tr>')
+
+    def cards_html(cards):
+        parts = []
+        for card in cards or []:
+            badges = ''
+            badges += (f'<span style="{S["card_y"]}">Y</span> ' * card.get('yellow', 0))
+            badges += (f'<span style="{S["card_g"]}">G</span> ' * card.get('green', 0))
+            badges += (f'<span style="{S["card_r"]}">R</span> ' * card.get('red', 0))
+            badges = badges.strip()
+            if badges:
+                parts.append(f'{card["name"]} {badges}')
+        return ', '.join(parts)
 
     parts = [f'<div style="{S["wrap"]}">',
              f'<p style="{S["h1"]}">Mentone Hockey Club — Weekly Update</p>',
@@ -432,6 +494,7 @@ def format_html(summaries: list[dict]) -> str:
         result = r['result'] or 'Not entered'
         scorers = s.get('scorers', [])
         goals_val = ', '.join(scorers) if scorers else '–'
+        cards_val = cards_html(s.get('cards', [])) or '–'
 
         opp      = r['opponent']
         round_n  = r['round']
@@ -443,6 +506,7 @@ def format_html(summaries: list[dict]) -> str:
             f'{row("Result:", f"{result} ({ha}) against {opp}")}'
             f'{row("Score:", score)}'
             f'{row("Goals:", goals_val)}'
+            f'{row("Cards:", cards_val)}'
             f'</table></div>'
         )
 
@@ -585,7 +649,8 @@ def main():
         except Exception as e:
             print(f"   ❌ Failed: {e}", file=sys.stderr)
             summaries.append({'name': comp['name'], 'short': comp['short'],
-                               'error': str(e), 'last_result': None, 'next_fixture': None})
+                               'error': str(e), 'last_result': None, 'next_fixture': None,
+                               'scorers': [], 'cards': []})
             continue
 
         played   = [r for r in rounds if r['status'] == 'played']
@@ -596,9 +661,12 @@ def main():
 
         # Fetch scorers for last played game
         scorers = []
+        cards = []
         if last_result and last_result.get('detail_url'):
-            print(f"   ⚽ Fetching scorers for R{last_result['round']}...", file=sys.stderr)
-            scorers = parse_scorers(last_result['detail_url'])
+            print(f"   ⚽ Fetching scorers/cards for R{last_result['round']}...", file=sys.stderr)
+            digest_stats = parse_game_digest_stats(last_result['detail_url'])
+            scorers = digest_stats['scorers']
+            cards = digest_stats['cards']
 
         # Write to Firestore
         if db and round_map and not args.no_firebase:
@@ -607,7 +675,7 @@ def main():
                 doc_id = round_map.get(last_result['round'])
                 if doc_id:
                     write_result_to_firestore(db, doc_id, comp['team_id'],
-                                              last_result, scorers, args.dry_run)
+                                              last_result, scorers, cards, args.dry_run)
                 else:
                     print(f"   ⚠️  R{last_result['round']} not in Firestore round map",
                           file=sys.stderr)
@@ -626,6 +694,7 @@ def main():
             'error':        None,
             'last_result':  last_result,
             'scorers':      scorers,
+            'cards':        cards,
             'next_fixture': next_fixture,
         })
 
