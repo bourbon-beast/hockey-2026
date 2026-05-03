@@ -1,0 +1,3 @@
+## 2024-05-03 - [Focus Visible Opacity for Hover States]
+**Learning:** When using parent hover state classes like `group-hover:opacity-100` alongside base utility classes like `opacity-0` for action buttons, keyboard-only users will not see those buttons when navigating if they only receive focus. The element gets focused, but remains invisible.
+**Action:** Always pair `opacity-0 group-hover:opacity-100` with `focus-visible:opacity-100` to ensure action buttons are fully visible when focused via keyboard navigation, along with appropriate `focus-visible:ring` utilities for clarity.
