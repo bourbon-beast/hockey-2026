@@ -1,5 +1,5 @@
 // useRoundManager.js
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { collection, onSnapshot, query, where } from 'firebase/firestore'
 import { db } from '../firebase'
 import * as DB from '../db'
@@ -654,38 +654,69 @@ export function useRoundManager() {
     }
 
     // ── Getters ──
-    const getTeamCounts = (teamId) => {
-        if (!roundData) return { total: 0, active: 0, confirmed: 0, waiting: 0, unavailableBucket: 0 }
-        const sels = roundData.selections.filter(s => s.team_id === teamId)
-        const activeSels = sels.filter(s => !s.is_unavailable)
-        const bucketCount = sels.filter(s => s.is_unavailable).length
-        return {
-            total: activeSels.length + bucketCount,
-            active: activeSels.length,
-            confirmed: activeSels.filter(s => (s.confirmed ?? 0) === 2).length,
-            waiting: activeSels.filter(s => (s.confirmed ?? 0) === 1).length,
-            uncontacted: activeSels.filter(s => (s.confirmed ?? 0) === 0).length,
-            unavailableBucket: bucketCount,
+    const memoizedDerivedData = useMemo(() => {
+        const counts = {}
+        const posCounts = {}
+        const activeSels = {}
+        const unavailSels = {}
+        const matches = {}
+        const playerCounts = {}
+        const duplicates = new Set()
+
+        if (roundData?.selections) {
+            roundData.selections.forEach(s => {
+                const pid = s.player_id
+                playerCounts[pid] = (playerCounts[pid] || 0) + 1
+                if (playerCounts[pid] > 1) {
+                    duplicates.add(Number(pid))
+                }
+
+                const tid = s.team_id
+                if (!counts[tid]) {
+                    counts[tid] = { total: 0, active: 0, confirmed: 0, waiting: 0, uncontacted: 0, unavailableBucket: 0 }
+                }
+                counts[tid].total++
+
+                if (s.is_unavailable) {
+                    counts[tid].unavailableBucket++
+                    if (!unavailSels[tid]) unavailSels[tid] = []
+                    unavailSels[tid].push(s)
+                } else {
+                    counts[tid].active++
+                    const cnf = s.confirmed ?? 0
+                    if (cnf === 2) counts[tid].confirmed++
+                    else if (cnf === 1) counts[tid].waiting++
+                    else counts[tid].uncontacted++
+
+                    if (!activeSels[tid]) activeSels[tid] = []
+                    activeSels[tid].push(s)
+                }
+
+                if (s.position) {
+                    if (!posCounts[tid]) posCounts[tid] = {}
+                    posCounts[tid][s.position] = (posCounts[tid][s.position] || 0) + 1
+                }
+            })
+
+            Object.keys(activeSels).forEach(tid => activeSels[tid].sort((a, b) => a.slot_number - b.slot_number))
+            Object.keys(unavailSels).forEach(tid => unavailSels[tid].sort((a, b) => a.slot_number - b.slot_number))
         }
-    }
 
-    const getPositionCounts = (teamId) => {
-        if (!roundData) return {}
-        const counts = {}
-        roundData.selections.filter(s => s.team_id === teamId && s.position).forEach(s => { counts[s.position] = (counts[s.position] || 0) + 1 })
-        return counts
-    }
+        if (roundData?.matches) {
+            roundData.matches.forEach(m => {
+                matches[m.team_id] = m
+            })
+        }
 
-    const getDuplicatePlayerIds = () => {
-        if (!roundData) return new Set()
-        const counts = {}
-        roundData.selections.forEach(s => { counts[s.player_id] = (counts[s.player_id] || 0) + 1 })
-        return new Set(Object.entries(counts).filter(([, c]) => c > 1).map(([id]) => Number(id)))
-    }
+        return { counts, posCounts, duplicates, activeSels, unavailSels, matches }
+    }, [roundData])
 
-    const getTeamActiveSelections = (teamId) => roundData?.selections ? roundData.selections.filter(s => s.team_id === teamId && !s.is_unavailable).sort((a, b) => a.slot_number - b.slot_number) : []
-    const getTeamUnavailableSelections = (teamId) => roundData?.selections ? roundData.selections.filter(s => s.team_id === teamId && s.is_unavailable).sort((a, b) => a.slot_number - b.slot_number) : []
-    const getMatchDetails = (teamId) => roundData ? (roundData.matches.find(m => m.team_id === teamId) || {}) : {}
+    const getTeamCounts = (teamId) => memoizedDerivedData.counts[teamId] || { total: 0, active: 0, confirmed: 0, waiting: 0, uncontacted: 0, unavailableBucket: 0 }
+    const getPositionCounts = (teamId) => memoizedDerivedData.posCounts[teamId] || {}
+    const getDuplicatePlayerIds = () => memoizedDerivedData.duplicates
+    const getTeamActiveSelections = (teamId) => memoizedDerivedData.activeSels[teamId] || []
+    const getTeamUnavailableSelections = (teamId) => memoizedDerivedData.unavailSels[teamId] || []
+    const getMatchDetails = (teamId) => memoizedDerivedData.matches[teamId] || {}
 
     return {
         state: {
