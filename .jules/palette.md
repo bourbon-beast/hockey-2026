@@ -1,0 +1,3 @@
+## 2024-05-24 - Interactive Elements relying on parent hover need focus-visible
+**Learning:** In list views where interactive elements (like the "↑ squad" button in `TeamColumn.jsx`) rely on a parent hover state to become visible (e.g., `sm:opacity-0 sm:group-hover:opacity-100`), these elements become completely invisible during keyboard navigation. This prevents keyboard-only users from understanding what action they are taking.
+**Action:** When styling elements with `group-hover:opacity-100`, always pair it with `focus-visible:opacity-100` and a clear focus ring (`focus-visible:ring-2`) to ensure they are visible when receiving keyboard focus.
