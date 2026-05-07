@@ -1,0 +1,4 @@
+## 2025-03-01 - [XSS via unexpectedly rich digest history content]
+**Vulnerability:** XSS vulnerability found in `src/components/FixtureView.jsx` where digest history HTML loaded from Firestore was rendered using `dangerouslySetInnerHTML={{ __html: selected.html }}` without any sanitization.
+**Learning:** Even though the digest content represents internal platform concepts (like matches and rounds), data loaded from the database must be treated as potentially malicious, especially given that the Firestore rules currently allow open public access. Any dynamic HTML fetched from the backend and injected via `dangerouslySetInnerHTML` allows for arbitrary script execution if an attacker modifies the stored document.
+**Prevention:** Always sanitize dynamic HTML content from external sources (even from the own database if not explicitly trusted and verified) using `DOMPurify.sanitize()` before rendering it via `dangerouslySetInnerHTML` in React applications.
