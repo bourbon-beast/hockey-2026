@@ -1,0 +1,3 @@
+## 2024-05-18 - Parent Hover Reveal Anti-Pattern
+**Learning:** Using parent hover states (e.g., `sm:group-hover:opacity-100`) to reveal interactive elements (like the "↑ squad" button) creates a critical accessibility failure for keyboard users, as the element remains invisible (`opacity-0`) when focused via the `Tab` key, resulting in a hidden focus state.
+**Action:** When applying hover-to-reveal styles to interactive elements, ALWAYS pair them with focus-visible overrides (e.g., `focus-visible:opacity-100`) so the element becomes visible and the focus ring is apparent when navigating via keyboard.
