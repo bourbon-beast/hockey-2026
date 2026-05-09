@@ -1,0 +1,3 @@
+## 2024-05-09 - O(N) Array Operations in Render Getters
+**Learning:** Returning values from `roundData.selections.filter(...)` inside the getters of the `useRoundManager` hook leads to severe O(N) penalties because these getters are executed repeatedly on every re-render across multiple components, especially during fast-firing interactions like drag-and-drop.
+**Action:** Instead of multiple separate `filter`, `find`, or `forEach` calls in each getter, pre-compute all derived states (counts, selections per team, duplicates, and match info) in a single O(N) pass using a `useMemo` block hooked to `roundData`. The getters can then do simple O(1) hash map lookups.
