@@ -1,5 +1,5 @@
 // useRoundManager.js
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { collection, onSnapshot, query, where } from 'firebase/firestore'
 import { db } from '../firebase'
 import * as DB from '../db'
@@ -653,39 +653,96 @@ export function useRoundManager() {
         })
     }
 
-    // ── Getters ──
-    const getTeamCounts = (teamId) => {
-        if (!roundData) return { total: 0, active: 0, confirmed: 0, waiting: 0, unavailableBucket: 0 }
-        const sels = roundData.selections.filter(s => s.team_id === teamId)
-        const activeSels = sels.filter(s => !s.is_unavailable)
-        const bucketCount = sels.filter(s => s.is_unavailable).length
-        return {
-            total: activeSels.length + bucketCount,
-            active: activeSels.length,
-            confirmed: activeSels.filter(s => (s.confirmed ?? 0) === 2).length,
-            waiting: activeSels.filter(s => (s.confirmed ?? 0) === 1).length,
-            uncontacted: activeSels.filter(s => (s.confirmed ?? 0) === 0).length,
-            unavailableBucket: bucketCount,
+    // ⚡ Bolt: Performance Optimization
+    // Impact: Pre-computes team selections, counts, and match details in O(N) using useMemo.
+    // Avoids redundant O(N) .filter() and .sort() operations on every render, ensuring 60fps during drag-and-drop.
+    const derivedData = useMemo(() => {
+        const teamCounts = {};
+        const positionCounts = {};
+        const duplicatePlayerIds = new Set();
+        const teamActiveSelections = {};
+        const teamUnavailableSelections = {};
+        const matchDetails = {};
+
+        if (roundData?.selections) {
+            const playerCounts = {};
+
+            roundData.selections.forEach(s => {
+                const tid = s.team_id;
+
+                // Init nested structures
+                if (!teamCounts[tid]) teamCounts[tid] = { total: 0, active: 0, confirmed: 0, waiting: 0, uncontacted: 0, unavailableBucket: 0 };
+                if (!positionCounts[tid]) positionCounts[tid] = {};
+                if (!teamActiveSelections[tid]) teamActiveSelections[tid] = [];
+                if (!teamUnavailableSelections[tid]) teamUnavailableSelections[tid] = [];
+
+                // Track player duplicates
+                playerCounts[s.player_id] = (playerCounts[s.player_id] || 0) + 1;
+
+                // Track position counts
+                if (s.position) {
+                    positionCounts[tid][s.position] = (positionCounts[tid][s.position] || 0) + 1;
+                }
+
+                // Bucket vs Active tracking
+                if (s.is_unavailable) {
+                    teamUnavailableSelections[tid].push(s);
+                    teamCounts[tid].unavailableBucket++;
+                    teamCounts[tid].total++;
+                } else {
+                    teamActiveSelections[tid].push(s);
+                    teamCounts[tid].active++;
+                    teamCounts[tid].total++;
+
+                    if ((s.confirmed ?? 0) === 2) teamCounts[tid].confirmed++;
+                    else if ((s.confirmed ?? 0) === 1) teamCounts[tid].waiting++;
+                    else teamCounts[tid].uncontacted++;
+                }
+            });
+
+            // Identify duplicates
+            for (const [id, count] of Object.entries(playerCounts)) {
+                if (count > 1) duplicatePlayerIds.add(Number(id));
+            }
+
+            // Sort selections by slot_number
+            Object.values(teamActiveSelections).forEach(arr => arr.sort((a, b) => a.slot_number - b.slot_number));
+            Object.values(teamUnavailableSelections).forEach(arr => arr.sort((a, b) => a.slot_number - b.slot_number));
         }
-    }
 
-    const getPositionCounts = (teamId) => {
-        if (!roundData) return {}
-        const counts = {}
-        roundData.selections.filter(s => s.team_id === teamId && s.position).forEach(s => { counts[s.position] = (counts[s.position] || 0) + 1 })
-        return counts
-    }
+        if (roundData?.matches) {
+            roundData.matches.forEach(m => {
+                matchDetails[m.team_id] = m;
+            });
+        }
 
-    const getDuplicatePlayerIds = () => {
-        if (!roundData) return new Set()
-        const counts = {}
-        roundData.selections.forEach(s => { counts[s.player_id] = (counts[s.player_id] || 0) + 1 })
-        return new Set(Object.entries(counts).filter(([, c]) => c > 1).map(([id]) => Number(id)))
-    }
+        return { teamCounts, positionCounts, duplicatePlayerIds, teamActiveSelections, teamUnavailableSelections, matchDetails };
+    }, [roundData]);
 
-    const getTeamActiveSelections = (teamId) => roundData?.selections ? roundData.selections.filter(s => s.team_id === teamId && !s.is_unavailable).sort((a, b) => a.slot_number - b.slot_number) : []
-    const getTeamUnavailableSelections = (teamId) => roundData?.selections ? roundData.selections.filter(s => s.team_id === teamId && s.is_unavailable).sort((a, b) => a.slot_number - b.slot_number) : []
-    const getMatchDetails = (teamId) => roundData ? (roundData.matches.find(m => m.team_id === teamId) || {}) : {}
+    // ── Getters ──
+    const getTeamCounts = useCallback((teamId) => {
+        return derivedData.teamCounts[teamId] || { total: 0, active: 0, confirmed: 0, waiting: 0, uncontacted: 0, unavailableBucket: 0 };
+    }, [derivedData]);
+
+    const getPositionCounts = useCallback((teamId) => {
+        return derivedData.positionCounts[teamId] || {};
+    }, [derivedData]);
+
+    const getDuplicatePlayerIds = useCallback(() => {
+        return derivedData.duplicatePlayerIds;
+    }, [derivedData]);
+
+    const getTeamActiveSelections = useCallback((teamId) => {
+        return derivedData.teamActiveSelections[teamId] || [];
+    }, [derivedData]);
+
+    const getTeamUnavailableSelections = useCallback((teamId) => {
+        return derivedData.teamUnavailableSelections[teamId] || [];
+    }, [derivedData]);
+
+    const getMatchDetails = useCallback((teamId) => {
+        return derivedData.matchDetails[teamId] || {};
+    }, [derivedData]);
 
     return {
         state: {
