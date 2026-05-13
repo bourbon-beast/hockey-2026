@@ -1,0 +1,3 @@
+## 2024-03-24 - Pre-computing state with useMemo in useRoundManager
+**Learning:** During frequent re-renders caused by complex drag-and-drop interactions, O(N) array operations (`.filter()`, `.sort()`) scattered across multiple getter functions (e.g., `getTeamActiveSelections`, `getTeamCounts`) create a massive performance bottleneck, dropping the application below 60fps.
+**Action:** Instead of filtering/sorting arrays inside getter functions that run on every render, strictly compute derived states using `useMemo` to pre-build O(1) hash map lookups from the source arrays. All derived state should be computed in a single pass over the source data.
