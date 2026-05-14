@@ -186,7 +186,8 @@ export default function UnavailabilityManager({ onSelectPlayer }) {
                 >Sun</button>
                 <button
                   onClick={() => removeEntry(player.id, rid)}
-                  className="w-3 text-slate-200 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 text-xs leading-none"
+                  aria-label={`Remove unavailability for ${player.name}`}
+                  className="w-3 text-slate-200 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded text-xs leading-none"
                   title="Remove"
                 >×</button>
               </div>
