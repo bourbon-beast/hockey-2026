@@ -1,0 +1,3 @@
+## 2024-03-01 - Missing Focus-Visible on Hover-Only Elements & ARIA Labels on Icon Buttons
+**Learning:** Found interactive elements (like the "↑ squad" button) heavily relying on `opacity-0 group-hover:opacity-100`. This completely hides the element from sighted keyboard users, as the element remains invisible when focused unless `focus-visible:opacity-100` is included. Also discovered several icon-only SVG buttons without explicit `aria-label` or `title` attributes, making them inaccessible to screen readers.
+**Action:** Always include `focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2` alongside hover opacity transitions to ensure keyboard users can see where their focus is. Always pair SVGs in `<button>` with an `aria-label` or `title`.
