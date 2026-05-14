@@ -1,0 +1,3 @@
+## 2025-02-26 - Memoize derived state in drag-and-drop contexts
+**Learning:** During complex drag-and-drop operations, React component render bodies (like `TeamColumn`) and utility hooks (like `useRoundManager` getters) recalculate frequently. Executing O(N) array operations (like `.filter()`, `.sort()`, or `.find()`) inside these getters or directly in the render body creates significant performance bottlenecks that can disrupt the 60fps framerate.
+**Action:** When designing getters or deriving state from lists in high-frequency rendering contexts, strictly pre-build derived data into O(1) hash map lookups using `useMemo`. Cache these derived models, and use `useCallback` to access them efficiently.
