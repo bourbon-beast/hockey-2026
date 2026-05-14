@@ -280,7 +280,7 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
               <p className="text-xs text-gray-400 mt-1">This player won't appear in selection lists</p>
             )}
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none flex-shrink-0">×</button>
+          <button onClick={onClose} aria-label="Close player modal" className="text-gray-400 hover:text-gray-600 text-2xl leading-none flex-shrink-0 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none p-0.5 rounded">×</button>
         </div>
 
         {/* ── Body ── */}
@@ -356,13 +356,14 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
                     <span key={teamId} className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full bg-blue-100 text-blue-700 border border-blue-200">
                       {teamId}
                       <button
+                        aria-label={`Remove team ${teamId}`}
                         onClick={async () => {
                           setTeamsPlayed(prev => prev.filter(t => t !== teamId))
                           await removeTeamPlayed(player.id, teamId)
                         }}
-                        className="ml-0.5 text-blue-400 hover:text-red-500 transition-colors leading-none"
+                        className="ml-0.5 text-blue-400 hover:text-red-500 transition-colors leading-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none p-0.5 rounded"
                       >
-                        ×
+                        <span aria-hidden="true">×</span>
                       </button>
                     </span>
                   ))}
