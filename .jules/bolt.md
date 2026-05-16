@@ -1,0 +1,3 @@
+## 2025-02-23 - Memoizing Array Operations in React Getters
+**Learning:** During heavy React re-renders (like 60fps drag-and-drop state updates), exposing O(N) array operations (`.filter()`, `.sort()`) in custom hook getters causes significant performance bottlenecks. `useRoundManager` originally filtered and sorted `roundData.selections` every time a component called a getter function.
+**Action:** Always pre-compute derived state once per data change. Use `useMemo` to build O(1) hash maps from source arrays, and have getter functions return lookups from these pre-built maps to maintain high frame rates during interactive features.
