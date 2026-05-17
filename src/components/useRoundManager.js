@@ -1,5 +1,5 @@
 // useRoundManager.js
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { collection, onSnapshot, query, where } from 'firebase/firestore'
 import { db } from '../firebase'
 import * as DB from '../db'
@@ -683,8 +683,26 @@ export function useRoundManager() {
         return new Set(Object.entries(counts).filter(([, c]) => c > 1).map(([id]) => Number(id)))
     }
 
-    const getTeamActiveSelections = (teamId) => roundData?.selections ? roundData.selections.filter(s => s.team_id === teamId && !s.is_unavailable).sort((a, b) => a.slot_number - b.slot_number) : []
-    const getTeamUnavailableSelections = (teamId) => roundData?.selections ? roundData.selections.filter(s => s.team_id === teamId && s.is_unavailable).sort((a, b) => a.slot_number - b.slot_number) : []
+    // ⚡ Bolt: Performance Optimization
+    // Impact: Pre-computes team selections into O(1) lookups using useMemo, eliminating repeated O(N) array filters per team during frequent renders.
+    const teamSelectionsMap = useMemo(() => {
+        const map = {}
+        if (roundData?.selections) {
+            roundData.selections.forEach(s => {
+                if (!map[s.team_id]) map[s.team_id] = { active: [], unavailable: [] }
+                if (s.is_unavailable) map[s.team_id].unavailable.push(s)
+                else map[s.team_id].active.push(s)
+            })
+            Object.values(map).forEach(team => {
+                team.active.sort((a, b) => a.slot_number - b.slot_number)
+                team.unavailable.sort((a, b) => a.slot_number - b.slot_number)
+            })
+        }
+        return map
+    }, [roundData?.selections])
+
+    const getTeamActiveSelections = useCallback((teamId) => teamSelectionsMap[teamId]?.active || [], [teamSelectionsMap])
+    const getTeamUnavailableSelections = useCallback((teamId) => teamSelectionsMap[teamId]?.unavailable || [], [teamSelectionsMap])
     const getMatchDetails = (teamId) => roundData ? (roundData.matches.find(m => m.team_id === teamId) || {}) : {}
 
     return {
