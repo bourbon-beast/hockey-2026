@@ -1,0 +1,3 @@
+## 2025-02-20 - Memoize O(N) array operations in getters
+**Learning:** Frequent React re-renders during drag-and-drop interactions cause O(N) array operations (`filter`, `sort`, `find`) in getter functions inside custom hooks like `useRoundManager.js` to become a massive performance bottleneck.
+**Action:** Always pre-compute derived states using `useMemo` to build O(1) hash map lookups from source arrays for getters that are called frequently during component re-renders.
