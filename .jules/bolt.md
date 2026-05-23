@@ -1,0 +1,3 @@
+## 2024-05-23 - Optimize Array Operations in Getters During Renders
+**Learning:** O(N) array operations (like `.filter()`, `.find()`, and `.map()`) inside custom hook getters called on every render cycle significantly degrade performance, especially during frequent state updates like complex drag-and-drop interactions.
+**Action:** Pre-compute derived state once per data change using `useMemo` to build O(1) hash maps. The getter functions should strictly perform direct hash map lookups instead of repeatedly iterating over arrays.
