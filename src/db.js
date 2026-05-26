@@ -577,6 +577,10 @@ export async function moveSelection(roundId, { playerId, from_team_id, target_te
 
 // ─── Player Unavailability (master list) ─────────────────────────────────────
 
+function unavailabilityDocId(roundId, playerId) {
+  return `${String(roundId)}_${String(playerId)}`
+}
+
 export async function getUnavailability({ round_id, player_id } = {}) {
   let q
   if (round_id) {
@@ -597,33 +601,38 @@ export async function getUnavailability({ round_id, player_id } = {}) {
 }
 
 export async function addUnavailability({ player_id, round_id, days = 'both', notes }) {
-  const ref = await addDoc(collection(db, 'playerUnavailability'), {
+  const id = unavailabilityDocId(round_id, player_id)
+  await setDoc(doc(db, 'playerUnavailability', id), {
     playerId: String(player_id),
     roundId: String(round_id),
     days: days,
     notes: notes || null,
     createdAt: new Date().toISOString(),
-  })
-  return { id: ref.id }
+  }, { merge: true })
+  return { id }
 }
 
 export async function updateUnavailabilityDays(player_id, round_id, days) {
   // days: 'sat' | 'sun' | 'both' — update existing record, or add if missing
+  await setDoc(doc(db, 'playerUnavailability', unavailabilityDocId(round_id, player_id)), {
+    playerId: String(player_id),
+    roundId: String(round_id),
+    days,
+    updatedAt: new Date().toISOString(),
+  }, { merge: true })
+
+  // Clean up any legacy random-ID duplicates left by older client writes.
   const q = query(
     collection(db, 'playerUnavailability'),
     where('playerId', '==', String(player_id)),
     where('roundId', '==', String(round_id))
   )
   const snap = await getDocs(q)
-  if (snap.empty) {
-    await addDoc(collection(db, 'playerUnavailability'), {
-      playerId: String(player_id),
-      roundId: String(round_id),
-      days,
-      createdAt: new Date().toISOString(),
-    })
-  } else {
-    await updateDoc(snap.docs[0].ref, { days })
+  const legacyDocs = snap.docs.filter(d => d.id !== unavailabilityDocId(round_id, player_id))
+  if (legacyDocs.length > 0) {
+    const batch = writeBatch(db)
+    legacyDocs.forEach(d => batch.delete(d.ref))
+    await batch.commit()
   }
 }
 

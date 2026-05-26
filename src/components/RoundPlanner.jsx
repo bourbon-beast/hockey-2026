@@ -5,16 +5,17 @@ import TeamColumn from './TeamColumn'
 import { generateEmailHtml } from '../utils/generateEmailHtml'
 import { auth } from '../firebase'
 import VoteResults from './VoteResults'
-import { createVoteSession, getVoteSession } from '../db.votes'
+import { createVoteSession, getVoteSession, updateVoteSession } from '../db.votes'
+import { buildVoteLink } from '../voteUrl'
 import {
-  ChevronRight, ArrowLeftRight, Plus, Copy, Pencil, Trash2,
+  ChevronRight, ArrowLeftRight, Plus, Copy, Check, Pencil, Trash2,
   Image, FileText, Mail, Vote
 } from 'lucide-react'
 
 export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
   const { state, actions, getters } = useRoundManager()
   const {
-    teams, allPlayers, currentRound, roundData, loading, roundUnavailability,
+    teams, allPlayers, rounds, currentRound, roundData, loading, roundUnavailability,
     seasonRounds, practiceRounds
   } = state
 
@@ -57,14 +58,17 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
   const [txtTeams, setTxtTeams] = useState([])
   const [showEmailModal, setShowEmailModal] = useState(false)
   const [emailHtml, setEmailHtml] = useState('')
-  const [emailSending, setEmailSending] = useState(false)
   const [emailSent, setEmailSent] = useState(false)
-  const [emailError, setEmailError] = useState(null)
   const [unavailOpen, setUnavailOpen] = useState(false)
   const [showVoteModal, setShowVoteModal] = useState(false)
   const [voteTeam, setVoteTeam] = useState(null)          // teamId being set up
   const [voteLink, setVoteLink] = useState(null)           // generated URL
+  const [voteLinkCopied, setVoteLinkCopied] = useState(false)
   const [voteCreating, setVoteCreating] = useState(false)
+  const [voteScoreFor, setVoteScoreFor] = useState('')
+  const [voteScoreAgainst, setVoteScoreAgainst] = useState('')
+  const [addScorers, setAddScorers] = useState(false)
+  const [voteScorerCounts, setVoteScorerCounts] = useState({})
   const [showVoteResults, setShowVoteResults] = useState(null) // { teamId }
   const [showSyncModal, setShowSyncModal] = useState(false)
   const [syncLoading, setSyncLoading] = useState(false)
@@ -234,36 +238,8 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
     if (!roundData || !currentRound) return
     const html = generateEmailHtml(roundData, currentRound, teams, duplicateIds)
     setEmailHtml(html)
-    setEmailSending(false)
     setEmailSent(false)
-    setEmailError(null)
     setShowEmailModal(true)
-  }
-
-  const sendToGmailDraft = async () => {
-    setEmailSending(true)
-    setEmailError(null)
-    try {
-      const roundLabel = currentRound?.round_type === 'season'
-        ? `Round ${currentRound.round_number}`
-        : currentRound?.name || 'Practice Match'
-      const fnUrl = import.meta.env.VITE_CREATE_GMAIL_DRAFT_URL
-      const res = await fetch(fnUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          subject: `MHC ${roundLabel} — Team Sheets`,
-          htmlBody: emailHtml,
-        }),
-      })
-      if (!res.ok) throw new Error(`Server error ${res.status}`)
-      setEmailSent(true)
-      setTimeout(() => setEmailSent(false), 4000)
-    } catch (err) {
-      setEmailError(`Failed to save draft: ${err.message}`)
-    } finally {
-      setEmailSending(false)
-    }
   }
 
   const downloadTeamTxt = (teamId) => {
@@ -291,29 +267,153 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
     teams.forEach((team, i) => setTimeout(() => downloadTeamTxt(team.id), i * 100))
   }
 
+  const getVoteMatch = (teamId = voteTeam) =>
+    (roundData?.matches || []).find(m => m.team_id === teamId) || {}
+
+  const getVotePlayers = (teamId = voteTeam) =>
+    (roundData?.selections || [])
+      .filter(s => s.team_id === teamId && !s.is_unavailable)
+      .sort((a, b) => a.slot_number - b.slot_number)
+      .map(s => ({ id: s.player_id, name: s.name }))
+
+  const getRoundLabel = () => {
+    if (!currentRound) return ''
+    return currentRound.round_type === 'season'
+      ? `Round ${currentRound.round_number}`
+      : currentRound.name || 'Practice Match'
+  }
+
+  const deriveVoteResult = (forScore, againstScore, fallback) => {
+    if (forScore === null || againstScore === null) return fallback || null
+    if (forScore > againstScore) return 'Win'
+    if (forScore < againstScore) return 'Loss'
+    return 'Draw'
+  }
+
+  const selectVoteTeam = async (teamId) => {
+    const match = getVoteMatch(teamId)
+    setVoteTeam(teamId)
+    setVoteLink(null)
+    setVoteLinkCopied(false)
+    setVoteScoreFor(match.score_for ?? '')
+    setVoteScoreAgainst(match.score_against ?? '')
+    setAddScorers(false)
+    setVoteScorerCounts({})
+
+    if (!currentRound) return
+    try {
+      const session = await getVoteSession(currentRound.id, teamId)
+      const scorers = Array.isArray(session?.matchContext?.scorers) ? session.matchContext.scorers : []
+      if (scorers.length) {
+        setAddScorers(true)
+        setVoteScorerCounts(Object.fromEntries(
+          scorers
+            .filter(scorer => scorer.playerId && Number(scorer.goals) > 0)
+            .map(scorer => [String(scorer.playerId), Number(scorer.goals)])
+        ))
+      }
+    } catch (e) {
+      console.warn('Failed to load existing vote scorers', e)
+    }
+  }
+
+  const resetVoteLinkFlow = () => {
+    setVoteTeam(null)
+    setVoteLink(null)
+    setVoteLinkCopied(false)
+    setVoteScoreFor('')
+    setVoteScoreAgainst('')
+    setAddScorers(false)
+    setVoteScorerCounts({})
+  }
+
+  const openVotingLinks = (teamId = null) => {
+    setShowOverflowMenu(false)
+    resetVoteLinkFlow()
+    setShowVoteModal(true)
+    if (teamId) selectVoteTeam(teamId)
+  }
+
+  const updateVoteScorerCount = (playerId, delta) => {
+    setVoteLink(null)
+    setVoteLinkCopied(false)
+    setVoteScorerCounts(prev => {
+      const key = String(playerId)
+      const nextCount = Math.max(0, (Number(prev[key]) || 0) + delta)
+      const next = { ...prev }
+      if (nextCount > 0) next[key] = nextCount
+      else delete next[key]
+      return next
+    })
+  }
+
   const handleCreateVoteLink = async () => {
     if (!currentRound || !voteTeam) return
     setVoteCreating(true)
     try {
-      const roundLabel = currentRound.round_type === 'season'
-        ? `Round ${currentRound.round_number}`
-        : currentRound.name || 'Practice Match'
+      const roundLabel = getRoundLabel()
+      const match = getVoteMatch()
+      const scoreForText = String(voteScoreFor).trim()
+      const scoreAgainstText = String(voteScoreAgainst).trim()
+      const scoreFor = scoreForText === '' ? null : Number(scoreForText)
+      const scoreAgainst = scoreAgainstText === '' ? null : Number(scoreAgainstText)
+      const hasScore = Number.isFinite(scoreFor) && Number.isFinite(scoreAgainst)
+      const players = getVotePlayers()
+      const scorers = addScorers
+        ? players
+            .map(player => ({
+              playerId: player.id,
+              name: player.name,
+              goals: Number(voteScorerCounts[String(player.id)]) || 0,
+            }))
+            .filter(scorer => scorer.goals > 0)
+        : []
+      const matchContext = {
+        teamId: voteTeam,
+        teamName: teams.find(t => t.id === voteTeam)?.name || voteTeam,
+        roundLabel,
+        opponent: match.opponent || '',
+        venue: match.venue || '',
+        matchDate: match.match_date || '',
+        time: match.time || '',
+        arriveAt: match.arrive_at || '',
+        isHome: match.is_home ?? (match.venue?.toLowerCase().includes('mentone') ?? null),
+        result: deriveVoteResult(hasScore ? scoreFor : null, hasScore ? scoreAgainst : null, match.result),
+        scoreFor: hasScore ? scoreFor : null,
+        scoreAgainst: hasScore ? scoreAgainst : null,
+        scorers,
+      }
 
-      // Check if session already exists
+      // Existing links are refreshed so late team changes and scores appear publicly.
       let session = await getVoteSession(currentRound.id, voteTeam)
       if (!session) {
-        const players = (roundData?.selections || [])
-          .filter(s => s.team_id === voteTeam && !s.is_unavailable)
-          .sort((a, b) => a.slot_number - b.slot_number)
-          .map(s => ({ id: s.player_id, name: s.name }))
-        await createVoteSession(currentRound.id, voteTeam, { roundLabel, players })
+        await createVoteSession(currentRound.id, voteTeam, { roundLabel, players, matchContext })
+      } else {
+        await updateVoteSession(currentRound.id, voteTeam, { roundLabel, players, matchContext })
       }
-      const baseUrl = window.location.origin
-      setVoteLink(`${baseUrl}/vote/${currentRound.id}/${voteTeam}`)
+      setVoteLink(buildVoteLink(window.location.origin, voteTeam, currentRound, rounds))
     } catch (e) {
       console.error('Failed to create vote session', e)
     }
     setVoteCreating(false)
+  }
+
+  const handleCopyVoteLink = async () => {
+    if (!voteLink) return
+    try {
+      await navigator.clipboard.writeText(voteLink)
+      setVoteLinkCopied(true)
+      setTimeout(() => setVoteLinkCopied(false), 2500)
+    } catch {
+      const el = document.createElement('textarea')
+      el.value = voteLink
+      document.body.appendChild(el)
+      el.select()
+      document.execCommand('copy')
+      document.body.removeChild(el)
+      setVoteLinkCopied(true)
+      setTimeout(() => setVoteLinkCopied(false), 2500)
+    }
   }
 
   const downloadTeamSheet = (sheet) => {
@@ -396,24 +496,26 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
           )}
 
           {/* ── Voting ── */}
-          {currentRound && isAdmin && (
+          {currentRound && (
             <>
               <div className="border-t border-slate-100 mt-1" />
               <div className="px-4 pt-2 pb-1">
                 <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Voting</span>
               </div>
               <MenuItem
-                onClick={() => { setShowOverflowMenu(false); setVoteTeam(null); setVoteLink(null); setShowVoteModal(true) }}
+                onClick={() => openVotingLinks()}
                 Icon={Vote}
                 label="Voting links"
                 colour="text-indigo-600"
               />
-              <MenuItem
-                onClick={() => { setShowOverflowMenu(false); setShowVoteResults(true) }}
-                Icon={Vote}
-                label="Vote results"
-                colour="text-indigo-400"
-              />
+              {isAdmin && (
+                <MenuItem
+                  onClick={() => { setShowOverflowMenu(false); setShowVoteResults(true) }}
+                  Icon={Vote}
+                  label="Vote results"
+                  colour="text-indigo-400"
+                />
+              )}
             </>
           )}
 
@@ -536,7 +638,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
       <div className="p-3 sm:p-4 space-y-3">
         {/* ── Navbar ── */}
 
-        {/* Desktop — single row (unchanged feel) */}
+        {/* Desktop — single row */}
         <div className="hidden sm:flex items-center gap-2 min-w-0">
           {plannerMode === 'season' ? (
             <>
@@ -704,6 +806,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
                       duplicateIds={duplicateIds}
                       onSelectPlayer={onSelectPlayer}
                       setPickerOpen={setPickerOpen}
+                      onCreateVoteLink={openVotingLinks}
                   />
               ))}
             </div>
@@ -1063,13 +1166,6 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
                 </div>
               </div>
 
-              {/* Error */}
-              {emailError && (
-                <div className="mx-6 mt-4 px-4 py-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
-                  {emailError}
-                </div>
-              )}
-
               {/* iframe preview */}
               <div className="p-4">
                 <iframe
@@ -1272,11 +1368,11 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
         {/* ── Create Voting Link Modal ── */}
         {showVoteModal && currentRound && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
               <div>
                 <h3 className="font-semibold text-lg">Voting links</h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  {currentRound.round_type === 'season' ? `Round ${currentRound.round_number}` : currentRound.name}
+                  {getRoundLabel()}
                 </p>
               </div>
 
@@ -1287,7 +1383,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
                   {teams.map(t => (
                     <button
                       key={t.id}
-                      onClick={() => { setVoteTeam(t.id); setVoteLink(null) }}
+                      onClick={() => selectVoteTeam(t.id)}
                       className={`py-2 rounded-lg text-sm font-semibold border transition-colors ${
                         voteTeam === t.id
                           ? 'bg-indigo-600 text-white border-indigo-600'
@@ -1300,6 +1396,122 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
                 </div>
               </div>
 
+              {voteTeam && (() => {
+                const match = getVoteMatch()
+                const votePlayers = getVotePlayers()
+                const scoreForText = String(voteScoreFor).trim()
+                const scoreAgainstText = String(voteScoreAgainst).trim()
+                const scoreIncomplete = (scoreForText === '') !== (scoreAgainstText === '')
+                const scorerTotal = Object.values(voteScorerCounts).reduce((sum, count) => sum + (Number(count) || 0), 0)
+                return (
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-3">
+                    <div>
+                      <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Match details</p>
+                      <p className="text-sm font-semibold text-slate-800 mt-1">
+                        {voteTeam} {match.opponent ? `vs ${match.opponent}` : 'match'}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {[match.match_date, match.time, match.venue].filter(Boolean).join(' · ') || 'No match details yet'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-2">Optional score</p>
+                      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                        <label className="space-y-1">
+                          <span className="text-[11px] text-slate-500">Mentone</span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={voteScoreFor}
+                            onChange={e => { setVoteScoreFor(e.target.value); setVoteLink(null); setVoteLinkCopied(false) }}
+                            placeholder="–"
+                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-indigo-400"
+                          />
+                        </label>
+                        <span className="text-slate-300 pt-5">–</span>
+                        <label className="space-y-1">
+                          <span className="text-[11px] text-slate-500">{match.opponent || 'Opponent'}</span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={voteScoreAgainst}
+                            onChange={e => { setVoteScoreAgainst(e.target.value); setVoteLink(null); setVoteLinkCopied(false) }}
+                            placeholder="–"
+                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:border-indigo-400"
+                          />
+                        </label>
+                      </div>
+                      {scoreIncomplete && (
+                        <p className="text-xs text-amber-600 mt-2">Enter both scores to show the result on the voting page.</p>
+                      )}
+                    </div>
+                    <div className="border-t border-slate-200 pt-3">
+                      <label className="flex items-center justify-between gap-3">
+                        <span>
+                          <span className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Add scorers?</span>
+                          <span className="block text-xs text-slate-500">Shown in the voting form header only.</span>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={addScorers}
+                          onChange={e => {
+                            setAddScorers(e.target.checked)
+                            setVoteLink(null)
+                            setVoteLinkCopied(false)
+                            if (!e.target.checked) setVoteScorerCounts({})
+                          }}
+                          className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                      </label>
+
+                      {addScorers && (
+                        <div className="mt-3 space-y-2">
+                          {votePlayers.length === 0 ? (
+                            <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-4 text-center text-xs text-slate-500">
+                              Add players to this team before selecting scorers.
+                            </div>
+                          ) : (
+                            <div className="max-h-52 space-y-1 overflow-y-auto pr-1">
+                              {votePlayers.map(player => {
+                                const count = Number(voteScorerCounts[String(player.id)]) || 0
+                                return (
+                                  <div key={player.id} className="flex items-center gap-2 rounded-lg bg-white px-2 py-2">
+                                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700">{player.name}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateVoteScorerCount(player.id, -1)}
+                                      disabled={count === 0}
+                                      className="h-7 w-7 rounded-md border border-slate-200 text-sm font-semibold text-slate-500 disabled:opacity-35"
+                                      aria-label={`Remove goal for ${player.name}`}
+                                    >
+                                      -
+                                    </button>
+                                    <span className="w-6 text-center text-sm font-semibold tabular-nums text-slate-800">{count}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateVoteScorerCount(player.id, 1)}
+                                      className="h-7 w-7 rounded-md bg-indigo-600 text-sm font-semibold text-white"
+                                      aria-label={`Add goal for ${player.name}`}
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                          {scorerTotal > 0 && (
+                            <p className="text-xs text-slate-500">
+                              {scorerTotal} goal{scorerTotal === 1 ? '' : 's'} selected.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })()}
+
               {/* Link area */}
               {voteTeam && (
                 voteLink ? (
@@ -1308,10 +1520,24 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
                       {voteLink}
                     </div>
                     <button
-                      onClick={() => navigator.clipboard.writeText(voteLink)}
-                      className="w-full py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium"
+                      onClick={handleCopyVoteLink}
+                      className={`flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium transition-colors ${
+                        voteLinkCopied
+                          ? 'bg-green-600 text-white'
+                          : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                      }`}
                     >
-                      Copy link
+                      {voteLinkCopied ? (
+                        <>
+                          <Check size={15} strokeWidth={2.5} />
+                          Copied
+                        </>
+                      ) : (
+                        <>
+                          <Copy size={15} strokeWidth={2} />
+                          Copy link
+                        </>
+                      )}
                     </button>
                   </div>
                 ) : (
@@ -1326,7 +1552,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
               )}
 
               <button
-                onClick={() => { setShowVoteModal(false); setVoteLink(null); setVoteTeam(null) }}
+                onClick={() => { setShowVoteModal(false); setVoteLink(null); setVoteLinkCopied(false); setVoteTeam(null); setVoteScoreFor(''); setVoteScoreAgainst(''); setAddScorers(false); setVoteScorerCounts({}) }}
                 className="w-full py-2 border rounded-lg text-sm text-slate-600"
               >
                 Close

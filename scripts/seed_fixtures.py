@@ -7,31 +7,24 @@ across all 22 rounds.
 
 Run from the project root:
     pip install firebase-admin
-    python seed_fixtures.py
-    python seed_fixtures.py --dry-run        # preview without writing
-    python seed_fixtures.py --env prod       # write to PROD (default: uat)
-    python seed_fixtures.py --round 1        # single round only
+    python scripts/seed_fixtures.py
+    python scripts/seed_fixtures.py --dry-run        # preview without writing
+    python scripts/seed_fixtures.py --env prod       # write to PROD (default: uat)
+    python scripts/seed_fixtures.py --round 1        # single round only
 """
 
 import json
+import sys
 import argparse
+from pathlib import Path
+
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# ── Configuration ─────────────────────────────────────────────────────────────
-
-FIXTURE_FILE = 'fixture_2026.json'
-
-ENV_CONFIG = {
-    'prod': {
-        'service_account': 'hockey-2026-f521f-firebase-adminsdk-fbsvc-6c421c359a.json',
-        'project_id':      'hockey-2026-f521f',
-    },
-    'uat': {
-        'service_account': 'hockey-2026-uat-firebase-adminsdk.json',
-        'project_id':      'hockey-2026-uat',
-    },
-}
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+from _paths import ENV_CONFIG, FIXTURE_JSON  # noqa: E402
 
 
 def load_round_map(db) -> dict:
@@ -56,12 +49,12 @@ def main():
     print(f"🎯 Target: {args.env.upper()} ({env['project_id']})")
 
     # Load fixture JSON
-    with open(FIXTURE_FILE) as f:
+    with open(FIXTURE_JSON) as f:
         data = json.load(f)
     fixtures = data['fixtures']
     if args.round:
         fixtures = [x for x in fixtures if x['round'] == args.round]
-    print(f"📊 Loaded {len(fixtures)} fixtures from {FIXTURE_FILE}")
+    print(f"📊 Loaded {len(fixtures)} fixtures from {FIXTURE_JSON}")
 
     # Init Firestore
     cred = credentials.Certificate(env['service_account'])

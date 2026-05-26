@@ -9,7 +9,7 @@
 // "Doncaster HC", "Doncaster Hockey Club" etc all trigger correctly.
 //
 // TODO: Move this data into Firestore config so it can be edited
-//       without a code deploy. Seed script: node scripts/seed-clashes.js
+//       without a code deploy (edit config/kitClashes in Firestore).
 
 export const SHIRT_CLASHES = [
   'Altona',

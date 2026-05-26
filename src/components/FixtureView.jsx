@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Clock, MapPin, ChevronDown, Copy, Check } from 'lucide-react'
+import { Clock, MapPin, ChevronDown, Copy, Check, Images } from 'lucide-react'
+import { exportDigestImageTriptych } from '../utils/digestExportImages'
 import { getRounds, getRoundMatches, getDigestHistory } from '../db'
+import PageHeader from './PageHeader'
 
 // ── Team display names ────────────────────────────────────────────────────────
 const TEAM_NAMES = {
@@ -334,6 +336,7 @@ function DigestPanel() {
   const [selected, setSelected]       = useState(null)
   const [loadingHistory, setLoadingH] = useState(true)
   const [copied, setCopied]           = useState(false)
+  const [exportingImages, setExportingImages] = useState(false)
 
   const loadHistory = () => {
     setLoadingH(true)
@@ -369,6 +372,21 @@ function DigestPanel() {
       document.body.removeChild(el)
       setCopied(true)
       setTimeout(() => setCopied(false), 2500)
+    }
+  }
+
+  const handleExportImages = async () => {
+    if (!selected?.html?.trim()) return
+    setExportingImages(true)
+    try {
+      await exportDigestImageTriptych(selected.html, {
+        roundNumber: selected.roundNumber ?? null,
+      })
+    } catch (e) {
+      console.warn('Digest image export failed', e)
+      alert('Could not generate digest images — try Chrome or Safari, or check console.')
+    } finally {
+      setExportingImages(false)
     }
   }
 
@@ -415,17 +433,31 @@ function DigestPanel() {
       </div>
 
       {/* Toolbar — generated timestamp + copy */}
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <span className="text-xs text-slate-400">
           {generatedAt ? `Generated ${generatedAt}` : ''}
         </span>
-        <button onClick={handleCopy}
-                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors
-                            ${copied
-                              ? 'bg-green-600 text-white'
-                              : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
-          {copied ? '✓ Copied' : 'Copy to clipboard'}
-        </button>
+        <div className="flex flex-wrap items-center gap-2 justify-end">
+          <button
+            type="button"
+            disabled={!selected?.html?.trim() || exportingImages}
+            title="Downloads 3 PNGs: results, next round, season stats (for WhatsApp etc.)"
+            onClick={() => handleExportImages()}
+            className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors
+                        ${(!selected?.html?.trim() || exportingImages)
+                          ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                          : 'bg-slate-700 hover:bg-slate-800 text-white'}`}>
+            <Images size={14} strokeWidth={2} className="flex-shrink-0" />
+            {exportingImages ? 'Saving PNGs…' : 'Digest images'}
+          </button>
+          <button type="button" onClick={handleCopy}
+                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors
+                              ${copied
+                                ? 'bg-green-600 text-white'
+                                : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
+            {copied ? '✓ Copied' : 'Copy to clipboard'}
+          </button>
+        </div>
       </div>
 
       {/* Preview */}
@@ -450,15 +482,12 @@ export default function FixtureView({ teams, isAdmin }) {
   const [mobileTab, setMobileTab] = useState('fixture')
 
   return (
-    <div className="p-3 sm:p-4 space-y-4 max-w-5xl mx-auto">
+    <div className="space-y-4">
 
-      {/* ── Page header — subtle ── */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-slate-800">Fixture &amp; Results</h2>
-          <p className="text-xs text-slate-400 mt-0.5">2026 Season · Mentone Men's Hockey</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Fixture & Results"
+        description="2026 Season · Mentone Men's Hockey"
+      />
 
       {/* ── Mobile tab switcher ── */}
       <div className="flex sm:hidden gap-1 bg-slate-100 rounded-lg p-1">

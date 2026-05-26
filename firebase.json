@@ -4,7 +4,10 @@
       "source": "functions",
       "codebase": "default",
       "runtime": "python312",
-      "ignore": ["venv", ".venv", "**/__pycache__/**"]
+      "ignore": ["venv", ".venv", "**/__pycache__/**"],
+      "secretEnvironmentVariables": [
+        { "key": "AUTO_SYNC_SECRET" }
+      ]
     }
   ],
   "hosting": [

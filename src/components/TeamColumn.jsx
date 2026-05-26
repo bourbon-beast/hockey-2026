@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { ArrowUpDown, AlertTriangle, MapPin, MessageSquare, MessageSquareText } from 'lucide-react'
+import { ArrowUpDown, AlertTriangle, MapPin, MessageSquare, MessageSquareText, Vote } from 'lucide-react'
 import { AVAILABILITY, POSITIONS, POSITION_STYLES } from './roundUtils'
 import { checkClash } from '../kitClashes'
 
@@ -77,7 +77,7 @@ function NotePopover({ sel, anchorRef, onSave, onClose }) {
 }
 
 export default function TeamColumn({
-    team, state, actions, getters, duplicateIds, onSelectPlayer, setPickerOpen
+    team, state, actions, getters, duplicateIds, onSelectPlayer, setPickerOpen, onCreateVoteLink
 }) {
     const { allPlayers, roundUnavailability, draggedPlayer, dragOverInfo, currentRound } = state
 
@@ -162,9 +162,15 @@ export default function TeamColumn({
         >
 
             {/* ── Team Header ── */}
-            <div className="text-white" style={{ background: '#0f172a' }}>
-                <div style={{ background: '#eab308', height: '4px' }} />
-                <div className="flex items-center justify-between px-3 py-2" style={{ background: '#1e3a8a' }}>
+            <div
+                className="text-white"
+                style={{
+                    background: 'linear-gradient(160deg, #0f2740 0%, #172f57 54%, #0f172a 100%)',
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)',
+                }}
+            >
+                <div style={{ background: 'linear-gradient(90deg, #eab308 0%, #facc15 65%, rgba(250,204,21,0.35) 100%)', height: '4px' }} />
+                <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
                     <div className="font-bold text-sm tracking-wide">{team.id}</div>
                     <div className="flex items-center gap-2">
                         <div className="flex items-center gap-1.5 text-xs">
@@ -175,6 +181,17 @@ export default function TeamColumn({
                                 {counts.active}
                             </span>
                         </div>
+                        {onCreateVoteLink && (
+                            <button
+                                type="button"
+                                onClick={() => onCreateVoteLink(team.id)}
+                                className="w-7 h-7 flex items-center justify-center rounded bg-white/10 text-white/70 hover:bg-white/20 hover:text-white transition-colors flex-shrink-0"
+                                title={`Create voting link for ${team.id}`}
+                                aria-label={`Create voting link for ${team.id}`}
+                            >
+                                <Vote size={13} strokeWidth={2.25} />
+                            </button>
+                        )}
                         {/* Sort mode toggle — mobile only */}
                         <button
                             onClick={() => setSortMode(m => !m)}
@@ -188,14 +205,14 @@ export default function TeamColumn({
                 </div>
 
                 {/* ── Match Inline Details ── */}
-                <div className="px-3 pt-2.5 pb-2 space-y-1.5" style={{ background: '#1e293b' }}>
+                <div className="px-3 pt-2.5 pb-2 space-y-1.5" style={{ background: 'rgba(15,23,42,0.54)', backdropFilter: 'blur(8px)' }}>
 
                     {/* Venue with map pin icon */}
                     <div className="flex items-center gap-1.5">
-                        <MapPin size={11} className="text-slate-500 flex-shrink-0" strokeWidth={2} />
+                        <MapPin size={11} className="text-blue-200/60 flex-shrink-0" strokeWidth={2} />
                         <input type="text" defaultValue={match.venue || ''} placeholder="Venue"
                             onBlur={e => actions.updateMatchDetails(team.id, { venue: e.target.value })}
-                            className="flex-1 bg-transparent text-slate-200 placeholder-slate-600 text-xs font-medium px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400" />
+                            className="flex-1 bg-transparent text-slate-100 placeholder-slate-500 text-xs font-medium px-0 py-0.5 border-0 border-b border-white/10 focus:outline-none focus:border-yellow-400" />
                     </div>
 
                     {/* Date · Time · Arrive — all on one row */}
@@ -211,19 +228,19 @@ export default function TeamColumn({
                                 className="absolute inset-0 opacity-0 w-full cursor-pointer"
                                 style={{ colorScheme: 'dark' }} />
                         </div>
-                        <span className="text-slate-700 text-xs flex-none">·</span>
+                        <span className="text-white/20 text-xs flex-none">·</span>
                         <input type="text" defaultValue={match.time || ''} placeholder="Time"
                             onBlur={e => actions.updateMatchDetails(team.id, { time: e.target.value })}
-                            className="w-16 flex-none bg-transparent text-white placeholder-slate-600 text-sm font-semibold tabular-nums px-0 py-0.5 border-0 border-b border-slate-600 focus:outline-none focus:border-yellow-400" />
-                        <span className="text-slate-600 text-xs flex-none">arr</span>
+                            className="w-16 flex-none bg-transparent text-white placeholder-slate-500 text-sm font-semibold tabular-nums px-0 py-0.5 border-0 border-b border-white/15 focus:outline-none focus:border-yellow-400" />
+                        <span className="text-blue-100/40 text-xs flex-none">arr</span>
                         <input type="text" defaultValue={match.arrive_at || ''} placeholder="–"
                             onBlur={e => actions.updateMatchDetails(team.id, { arrive_at: e.target.value })}
-                            className="w-12 flex-none bg-transparent text-slate-400 placeholder-slate-700 text-xs px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400" />
+                            className="w-12 flex-none bg-transparent text-slate-300 placeholder-slate-500 text-xs px-0 py-0.5 border-0 border-b border-white/10 focus:outline-none focus:border-yellow-400" />
                     </div>
 
                     {/* Opponent — clearly labelled */}
                     <div className="flex items-baseline gap-1.5">
-                        <span className="text-slate-500 text-xs flex-none font-medium">vs</span>
+                        <span className="text-blue-100/45 text-xs flex-none font-medium">vs</span>
                         <input
                             type="text"
                             defaultValue={match.opponent || ''}
@@ -241,12 +258,12 @@ export default function TeamColumn({
                                     updates.socks_colour = socks ? 'Blue' : 'Yellow'
                                 actions.updateMatchDetails(team.id, updates)
                             }}
-                            className="flex-1 bg-transparent text-slate-100 placeholder-slate-500 text-sm font-semibold px-0 py-0.5 border-0 border-b border-slate-700 focus:outline-none focus:border-yellow-400"
+                            className="flex-1 bg-transparent text-slate-50 placeholder-slate-500 text-sm font-semibold px-0 py-0.5 border-0 border-b border-white/10 focus:outline-none focus:border-yellow-400"
                         />
                     </div>
 
                     {/* Kit row — label + colour select, clash icon inside button */}
-                    <div className="flex items-center gap-2 pt-1 border-t border-slate-700/50">
+                    <div className="flex items-center gap-2 pt-1 border-t border-white/10">
                         {Object.entries(KIT_COLOURS).map(([key, { options, label }]) => {
                             const defaults = { top_colour: 'Blue', socks_colour: 'Yellow' }
                             const raw = match[key] || defaults[key]
@@ -260,7 +277,7 @@ export default function TeamColumn({
                                         value={val}
                                         onChange={e => actions.updateMatchDetails(team.id, { [key]: e.target.value })}
                                         style={{ borderColor: isClash ? '#fbbf24' : kitHex, color: 'transparent' }}
-                                        className="w-full text-xs rounded px-2 py-1 appearance-none cursor-pointer focus:outline-none bg-transparent border transition-colors"
+                                        className="w-full text-xs rounded-md px-2 py-1 appearance-none cursor-pointer focus:outline-none bg-white/5 border transition-colors"
                                     >
                                         {options.map(o => (
                                             <option key={o} value={o}

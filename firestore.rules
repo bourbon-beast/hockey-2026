@@ -16,34 +16,77 @@ service cloud.firestore {
     match /clubOverrides/{rawName} { allow read: if true; allow write: if false; }
     match /syncState/{compId}      { allow read: if true; allow write: if false; }
 
-    // Squad tracker collections: keep existing UAT behavior until auth rules
-    // are reintroduced deliberately.
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email != null;
+    }
+
+    function userAccessDoc() {
+      return /databases/$(database)/documents/allowedUsers/$(request.auth.token.email);
+    }
+
+    function isBootstrapAdmin() {
+      return isSignedIn() && request.auth.token.email == 'steve.g.waters@gmail.com';
+    }
+
+    function isApprovedTrackerUser() {
+      return isBootstrapAdmin()
+        || (isSignedIn()
+          && exists(userAccessDoc())
+          && get(userAccessDoc()).data.enabled == true);
+    }
+
+    function isTrackerAdmin() {
+      return isBootstrapAdmin()
+        || (isApprovedTrackerUser()
+          && get(userAccessDoc()).data.role == 'admin');
+    }
+
+    // Squad tracker collections.
     match /config/{docId} {
-      allow read, write: if true;
+      allow read, write: if isApprovedTrackerUser();
     }
     match /players/{playerId} {
-      allow read, write: if true;
+      allow read, write: if isApprovedTrackerUser();
     }
     match /rounds/{roundId} {
-      allow read, write: if true;
+      // Public vote links list season rounds to resolve readable round keys.
+      allow read: if true;
+      allow write: if isApprovedTrackerUser();
     }
     match /rounds/{roundId}/{document=**} {
-      allow read, write: if true;
+      allow read, write: if isApprovedTrackerUser();
     }
     match /playerUnavailability/{docId} {
-      allow read, write: if true;
+      allow read, write: if isApprovedTrackerUser();
+    }
+    match /unavailabilitySubmissions/{submissionId} {
+      // Public form writes go through Cloud Functions. Tracker admins review
+      // staged submissions here before promoting them to playerUnavailability.
+      allow read, write: if isTrackerAdmin();
+    }
+    match /unavailabilitySubmitterLinks/{emailId} {
+      // Admin-maintained email-to-player links used by public lookup functions.
+      allow read, write: if isTrackerAdmin();
     }
     match /votes/{voteId} {
-      allow read, write: if true;
+      // Public vote links can read a known session doc; listing sessions is tracker-only.
+      allow get: if true;
+      allow list: if isApprovedTrackerUser();
+      allow create, update, delete: if isApprovedTrackerUser();
     }
-    match /votes/{voteId}/{document=**} {
-      allow read, write: if true;
+    match /votes/{voteId}/responses/{responseId} {
+      allow create: if true;
+      allow read, update, delete: if isTrackerAdmin();
+    }
+    match /allowedUsers/{email} {
+      allow get: if isSignedIn() && request.auth.token.email == email;
+      allow list, create, update, delete: if isTrackerAdmin();
     }
     match /hvSync/{docId} {
-      allow read, write: if true;
+      allow read, write: if isApprovedTrackerUser();
     }
     match /weeklyDigests/{docId} {
-      allow read, write: if true;
+      allow read, write: if isApprovedTrackerUser();
     }
   }
 }

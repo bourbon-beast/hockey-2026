@@ -1,12 +1,16 @@
 // Admin-only page — consolidates all sync operations and management tools.
 
 import { useState } from 'react'
-import { Settings, RefreshCw, Calendar } from 'lucide-react'
+import { Calendar, RefreshCw, Users } from 'lucide-react'
 import HvStatsSync from './admin/HvStatsSync'
+import AvailabilitySync from './admin/AvailabilitySync'
+import AllowedUsersAdmin from './admin/AllowedUsersAdmin'
+import PageHeader from './PageHeader'
 
 const SECTIONS = [
   { id: 'hv',     label: 'HV Sync',      Icon: RefreshCw, desc: 'Scrapes results, fixtures, player stats & generates weekly digest' },
-  { id: 'unavail',label: 'Availability', Icon: Calendar,  desc: 'Sync unavailability from Google Sheets' },
+  { id: 'unavail',label: 'Availability', Icon: Calendar,  desc: 'Review player form submissions and sync unavailability from Google Sheets' },
+  { id: 'users',  label: 'Users',        Icon: Users,     desc: 'Manage emails allowed to access the tracker' },
 ]
 
 export default function AdminView() {
@@ -14,24 +18,15 @@ export default function AdminView() {
   const active = SECTIONS.find(s => s.id === activeSection)
 
   return (
-    <div className="max-w-4xl mx-auto space-y-4">
+    <div className="w-full space-y-4">
 
-      {/* ── Page header ── */}
-      <div className="flex items-center gap-3">
-        <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center flex-shrink-0">
-          <Settings size={16} strokeWidth={1.75} className="text-white" />
-        </div>
-        <div>
-          <h2 className="text-base font-bold text-slate-800">Admin</h2>
-          <p className="text-xs text-slate-400">Data sync &amp; management</p>
-        </div>
-      </div>
+      <PageHeader title="Admin" description="Data sync & management" />
 
       {/* ── Layout: sidebar nav + content ── */}
-      <div className="flex gap-4 items-start">
+      <div className="flex flex-col gap-4 items-stretch sm:flex-row sm:items-start">
 
         {/* Sidebar nav */}
-        <div className="w-44 flex-shrink-0 bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="w-full sm:w-44 flex-shrink-0 bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
           {SECTIONS.map(s => (
             <button
               key={s.id}
@@ -58,19 +53,11 @@ export default function AdminView() {
 
           {/* Section content */}
           {activeSection === 'hv'      && <HvStatsSync />}
-          {activeSection === 'unavail' && <ComingSoon label="Availability Sync" note="Moving from Round Planner — coming soon" />}
+          {activeSection === 'unavail' && <AvailabilitySync />}
+          {activeSection === 'users'   && <AllowedUsersAdmin />}
         </div>
 
       </div>
-    </div>
-  )
-}
-
-function ComingSoon({ label, note }) {
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 px-6 py-10 text-center">
-      <p className="text-sm font-medium text-slate-500">{label}</p>
-      <p className="text-xs text-slate-400 mt-1">{note}</p>
     </div>
   )
 }

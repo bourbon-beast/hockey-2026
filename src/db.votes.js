@@ -1,7 +1,7 @@
 // src/db.votes.js — Firestore helpers for round voting
 import { db } from './firebase'
 import {
-  collection, doc, getDoc, getDocs, setDoc, addDoc, query, orderBy
+  collection, doc, getDoc, getDocs, setDoc, updateDoc, addDoc, query, orderBy
 } from 'firebase/firestore'
 
 // ─── Vote Session ─────────────────────────────────────────────────────────────
@@ -18,15 +18,45 @@ export async function getVoteSession(roundId, teamId) {
   return { id: snap.id, ...snap.data() }
 }
 
-export async function createVoteSession(roundId, teamId, { roundLabel, players }) {
+export async function createVoteSession(roundId, teamId, { roundLabel, players, matchContext = null }) {
   const id = voteSessionId(roundId, teamId)
   await setDoc(doc(db, 'votes', id), {
     roundId: String(roundId),
     teamId,
     roundLabel,
     players,          // [{ id, name }] — snapshot of players at time of creation
+    matchContext,     // optional snapshot of opponent, venue, date/time, and score
     isOpen: true,
     createdAt: new Date().toISOString(),
+  })
+  return id
+}
+
+export async function updateVoteSession(roundId, teamId, { roundLabel, players, matchContext = null }) {
+  const id = voteSessionId(roundId, teamId)
+  await updateDoc(doc(db, 'votes', id), {
+    roundLabel,
+    players,
+    matchContext,
+    updatedAt: new Date().toISOString(),
+  })
+  return id
+}
+
+export async function closeVoteSession(roundId, teamId) {
+  const id = voteSessionId(roundId, teamId)
+  await updateDoc(doc(db, 'votes', id), {
+    isOpen: false,
+    closedAt: new Date().toISOString(),
+  })
+  return id
+}
+
+export async function reopenVoteSession(roundId, teamId) {
+  const id = voteSessionId(roundId, teamId)
+  await updateDoc(doc(db, 'votes', id), {
+    isOpen: true,
+    closedAt: null,
   })
   return id
 }
@@ -48,6 +78,90 @@ export async function getVoteResponses(sessionId) {
     query(collection(db, 'votes', sessionId, 'responses'), orderBy('submittedAt', 'asc'))
   )
   return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+}
+
+export async function getVotingOverview(rounds, teams) {
+  const sessionsSnap = await getDocs(collection(db, 'votes'))
+  const sessionDocs = sessionsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+  const sessionMap = {}
+
+  await Promise.all(sessionDocs.map(async session => {
+    const responses = await getVoteResponses(session.id)
+    sessionMap[session.id] = {
+      ...session,
+      responses,
+      responseCount: responses.length,
+      players: Array.isArray(session.players) ? session.players : [],
+    }
+  }))
+
+  const roundStats = []
+  const teamTallies = {}
+
+  teams.forEach(team => {
+    const playerTotals = {}
+    const roundsForTeam = rounds.map(round => {
+      const sessionId = voteSessionId(round.id, team.id)
+      const session = sessionMap[sessionId] || null
+      const players = session?.players || []
+      const responses = session?.responses || []
+      const tally = session ? tallyVotes(responses, players) : []
+
+      tally.forEach(player => {
+        if (!playerTotals[String(player.playerId)]) {
+          playerTotals[String(player.playerId)] = {
+            playerId: player.playerId,
+            name: player.name,
+            points: 0,
+            votes3: 0,
+            votes2: 0,
+            votes1: 0,
+            rounds: {},
+          }
+        }
+        playerTotals[String(player.playerId)].points += player.points
+        playerTotals[String(player.playerId)].votes3 += player.votes3
+        playerTotals[String(player.playerId)].votes2 += player.votes2
+        playerTotals[String(player.playerId)].votes1 += player.votes1
+        playerTotals[String(player.playerId)].rounds[String(round.id)] = player.points
+      })
+
+      const squadSize = players.length
+      const responseCount = session?.responseCount || 0
+      const participation = squadSize > 0 ? Math.round((responseCount / squadSize) * 100) : 0
+      const match = session?.matchContext || {}
+
+      return {
+        roundId: round.id,
+        roundNumber: round.round_number,
+        roundLabel: session?.roundLabel || match.roundLabel || (round.round_type === 'season' ? `Round ${round.round_number}` : round.name || 'Practice'),
+        roundDate: match.matchDate || round.round_date || round.sat_date || '',
+        teamId: team.id,
+        teamName: team.name || team.id,
+        sessionId,
+        session,
+        hasSession: !!session,
+        isOpen: session?.isOpen === true,
+        opponent: match.opponent || '',
+        venue: match.venue || '',
+        result: match.result || '',
+        scoreFor: match.scoreFor,
+        scoreAgainst: match.scoreAgainst,
+        squadSize,
+        responseCount,
+        participation,
+      }
+    })
+
+    roundStats.push(...roundsForTeam)
+    teamTallies[team.id] = Object.values(playerTotals).sort((a, b) =>
+      b.points - a.points ||
+      b.votes3 - a.votes3 ||
+      a.name.localeCompare(b.name)
+    )
+  })
+
+  return { sessions: sessionMap, roundStats, teamTallies }
 }
 
 // Tally up points: returns [{ playerId, name, points, votes3, votes2, votes1 }] sorted desc

@@ -1,28 +1,29 @@
-// src/auth.js — Google Sign-In wrapper
-// Small surface: sign in, sign out, subscribe, and read the
-// Gmail OAuth access token (used later by the digest feature).
+// src/auth.js — Authentication helpers
 import {
+  signInWithEmailAndPassword,
   signInWithPopup,
+  sendPasswordResetEmail,
   signOut,
   onAuthStateChanged,
-  GoogleAuthProvider,
+  onIdTokenChanged,
 } from 'firebase/auth'
 import { auth, googleProvider } from './firebase'
 
-// Module-level cache for the Gmail access token.
-// Not persisted: lost on refresh (Firebase doesn't store OAuth
-// access tokens). We re-request via popup when we need it again.
-let gmailAccessToken = null
-
 export async function signInWithGoogle() {
   const result = await signInWithPopup(auth, googleProvider)
-  const credential = GoogleAuthProvider.credentialFromResult(result)
-  gmailAccessToken = credential?.accessToken ?? null
   return result.user
 }
 
+export async function signInWithEmailPassword(email, password) {
+  const result = await signInWithEmailAndPassword(auth, email, password)
+  return result.user
+}
+
+export async function sendPasswordReset(email) {
+  await sendPasswordResetEmail(auth, email)
+}
+
 export async function signOutUser() {
-  gmailAccessToken = null
   await signOut(auth)
 }
 
@@ -30,6 +31,6 @@ export function subscribeToAuth(callback) {
   return onAuthStateChanged(auth, callback)
 }
 
-export function getGmailAccessToken() {
-  return gmailAccessToken
+export function subscribeToAuthToken(callback) {
+  return onIdTokenChanged(auth, callback)
 }

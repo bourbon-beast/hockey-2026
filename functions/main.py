@@ -283,23 +283,6 @@ def _format_cards(stats):
     return cards
 
 
-def _card_letters(card):
-    letters = []
-    letters += ['Y'] * card.get('yellow', 0)
-    letters += ['G'] * card.get('green', 0)
-    letters += ['R'] * card.get('red', 0)
-    return letters
-
-
-def _format_cards_text(cards):
-    parts = []
-    for card in cards or []:
-        letters = _card_letters(card)
-        if letters:
-            parts.append(f"{card['name']} ({' '.join(letters)})")
-    return ', '.join(parts)
-
-
 def _hv_name_to_display(hv_name):
     """Convert 'Richardson, Scott' → 'Scott Richardson' for display."""
     nm = re.match(r'\d+\.\s*([^(#]+)', hv_name)
@@ -882,15 +865,22 @@ def _ordinal(n):
     return str(n) + suffixes.get(n % 10, 'th')
 
 
+def _digest_week_ending_sunday_str():
+    """Most recent Sunday (including today if Sunday); digest labels the week by that date."""
+    today = date.today()
+    sunday = today - timedelta(days=(today.weekday() + 1) % 7)
+    return sunday.strftime('%d %b %Y')
+
+
 def format_text(summaries, leaders=None, ladder_data=None, weekly_notes=None):
     SEP = '------------------------------'
-    today = date.today().strftime('%d %b %Y')
+    week_ending = _digest_week_ending_sunday_str()
     last_rounds = [s['last_result']['round'] for s in summaries if s.get('last_result')]
     last_round_num = last_rounds[0] if last_rounds else None
     title = f"Mentone Men's — Round {last_round_num} Wrap" if last_round_num else "Mentone Men's — Round Wrap"
     lines = [
         title,
-        'Week ending ' + today,
+        'Week ending ' + week_ending,
         'Please keep your unavailability up to date: https://docs.google.com/spreadsheets/d/1MWl3gvFFzniLRFACXHmzPzsAQRIYJsMPlSlnNKh4-p8/edit?usp=sharing',
     ]
     # Optional weekly notes — injected as a highlighted block before Results
@@ -907,11 +897,9 @@ def format_text(summaries, leaders=None, ladder_data=None, weekly_notes=None):
             continue
         score  = (str(r['score_mentone']) + '-' + str(r['score_opponent'])) if r['score_mentone'] is not None else '--'
         result = r['result'] or 'Not entered'
-        cards  = _format_cards_text(s.get('cards', [])) or '--'
         lines += ['\n' + s['name'] + ' | Round ' + str(r['round']) + ' | ' + result,
                   'Versus: ' + r['opponent'] + '  ' + score,
-                  'Goals:  ' + (', '.join(s.get('scorers', [])) or '--'),
-                  'Cards:  ' + cards]
+                  'Goals:  ' + (', '.join(s.get('scorers', [])) or '--')]
 
     lines += ['', SEP, 'NEXT ROUND', SEP]
     next_round_nums = [s['next_fixture']['round'] for s in summaries if s.get('next_fixture')]
@@ -980,7 +968,7 @@ def format_text(summaries, leaders=None, ladder_data=None, weekly_notes=None):
     return '\n'.join(lines)
 
 def format_html(summaries, leaders=None, ladder_data=None, weekly_notes=None):
-    today = date.today().strftime('%d %b %Y')
+    week_ending = _digest_week_ending_sunday_str()
     S = {
         'wrap':    'font-family:Arial,sans-serif;font-size:14px;color:#1e293b;max-width:600px;',
         'h1':      'font-size:18px;font-weight:bold;margin:0 0 2px 0;',
@@ -988,15 +976,23 @@ def format_html(summaries, leaders=None, ladder_data=None, weekly_notes=None):
         'rule':    'border:none;border-top:2px solid #1e3a8a;margin:16px 0 8px 0;',
         'section': 'font-size:13px;font-weight:bold;text-transform:uppercase;letter-spacing:0.05em;color:#1e3a8a;margin:0 0 12px 0;',
         'block':   'margin:0 0 16px 0;padding:0;',
-        'comp':    'font-size:14px;font-weight:bold;margin:0 0 3px 0;',
+        'comp':    'font-size:14px;font-weight:bold;line-height:1.45;margin:0 0 3px 0;',
         'label':   'font-weight:bold;',
         'muted':   'color:#64748b;',
-        'badge_w': 'display:inline-block;padding:1px 7px;border-radius:3px;font-size:12px;font-weight:bold;color:#fff;background:#16a34a;',
-        'badge_l': 'display:inline-block;padding:1px 7px;border-radius:3px;font-size:12px;font-weight:bold;color:#fff;background:#dc2626;',
-        'badge_d': 'display:inline-block;padding:1px 7px;border-radius:3px;font-size:12px;font-weight:bold;color:#fff;background:#ca8a04;',
-        'card_g':  'display:inline-block;padding:0 5px;border-radius:3px;font-size:11px;font-weight:bold;color:#fff;background:#16a34a;',
-        'card_y':  'display:inline-block;padding:0 5px;border-radius:3px;font-size:11px;font-weight:bold;color:#fff;background:#ca8a04;',
-        'card_r':  'display:inline-block;padding:0 5px;border-radius:3px;font-size:11px;font-weight:bold;color:#fff;background:#dc2626;',
+        # Result + card badges rendered as coloured bold text rather than pills.
+        # Avoids html2canvas baseline / box-centering quirks (used by
+        # digestExportImages.js for PNG export) — text rendering is identical
+        # in Gmail and html2canvas, so no rendering trade-off either way.
+        # TODO: If we ever want richer / more brand-forward image exports
+        # (e.g. for Facebook posts), build a separate format_html_for_image()
+        # variant where pills can be reintroduced for visual punch.
+        'badge_w': 'font-size:13px;font-weight:bold;letter-spacing:0.02em;color:#16a34a;text-transform:uppercase;',
+        'badge_l': 'font-size:13px;font-weight:bold;letter-spacing:0.02em;color:#dc2626;text-transform:uppercase;',
+        'badge_d': 'font-size:13px;font-weight:bold;letter-spacing:0.02em;color:#ca8a04;text-transform:uppercase;',
+        # Card letters as coloured bold text — green darker than win green for contrast
+        'card_g':  'font-size:12px;font-weight:bold;color:#15803d;margin:0 3px 0 0;',
+        'card_y':  'font-size:12px;font-weight:bold;color:#ca8a04;margin:0 3px 0 0;',
+        'card_r':  'font-size:12px;font-weight:bold;color:#dc2626;margin:0 3px 0 0;',
     }
 
     def badge(result):
@@ -1004,20 +1000,8 @@ def format_html(summaries, leaders=None, ladder_data=None, weekly_notes=None):
         return f'<span style="{st}">{result}</span>'
 
     def row(label, value):
-        return (f'<tr><td style="{S["label"]}width:70px;padding:1px 8px 1px 0;">{label}</td>'
-                f'<td style="padding:1px 0;">{value}</td></tr>')
-
-    def cards_html(cards):
-        parts = []
-        for card in cards or []:
-            badges = ''
-            badges += (f'<span style="{S["card_y"]}">Y</span> ' * card.get('yellow', 0))
-            badges += (f'<span style="{S["card_g"]}">G</span> ' * card.get('green', 0))
-            badges += (f'<span style="{S["card_r"]}">R</span> ' * card.get('red', 0))
-            badges = badges.strip()
-            if badges:
-                parts.append(f'{card["name"]} {badges}')
-        return ', '.join(parts)
+        return (f'<tr><td style="{S["label"]}width:1%;white-space:nowrap;padding:1px 6px 1px 0;vertical-align:top;">{label}</td>'
+                f'<td style="padding:1px 0;vertical-align:top;">{value}</td></tr>')
 
     next_rounds    = [s['next_fixture']['round'] for s in summaries if s.get('next_fixture')]
     next_round_num = next_rounds[0] if next_rounds else None
@@ -1030,7 +1014,7 @@ def format_html(summaries, leaders=None, ladder_data=None, weekly_notes=None):
 
     parts = [f'<div style="{S["wrap"]}">',
              f'<p style="{S["h1"]}">Mentone Men\'s — {title}</p>',
-             f'<p style="{S["sub"]}">Week ending {today}</p>',
+             f'<p style="{S["sub"]}">Week ending {week_ending}</p>',
              f'<p style="font-size:12px;color:#64748b;margin:0 0 12px 0;">'
              f'Please keep your unavailability up to date: '
              f'<a href="{UNAVAIL_URL}" style="color:#1d4ed8;">Unavailability Tracker</a></p>',
@@ -1063,15 +1047,13 @@ def format_html(summaries, leaders=None, ladder_data=None, weekly_notes=None):
         scorers = s.get('scorers', [])
         opp     = r['opponent']
         goals   = ', '.join(scorers) if scorers else '\u2013'
-        cards   = cards_html(s.get('cards', [])) or '\u2013'
         parts.append(
             '<div style="%s">'
             '<p style="%s">%s &nbsp;&middot;&nbsp; Round %s &nbsp;%s</p>'
-            '<table style="border-collapse:collapse;">%s%s%s</table></div>'
+            '<table style="border-collapse:collapse;width:100%%;">%s%s</table></div>'
             % (S['block'], S['comp'], s['name'], r['round'], badge(result),
                row('Versus:', opp + ' &nbsp; ' + score),
-               row('Goals:', goals),
-               row('Cards:', cards))
+               row('Goals:', goals))
         )
 
     if next_round_num:
@@ -1098,8 +1080,8 @@ def format_html(summaries, leaders=None, ladder_data=None, weekly_notes=None):
             bg = '#f8fafc' if TEAM_ORDER.index(team_id) % 2 == 0 else '#ffffff'
             ladder_rows += (
                 f'<tr style="background:{bg};">'
-                f'<td style="padding:3px 6px;font-weight:500;color:#1e293b;">{TEAM_DISPLAY_NAMES.get(team_id, team_id)}</td>'
-                f'<td style="padding:3px 6px;font-weight:bold;color:{pos_colour};text-align:right;">'
+                f'<td style="padding:3px 6px;font-weight:500;color:#1e293b;width:58%;word-wrap:break-word;overflow-wrap:break-word;">{TEAM_DISPLAY_NAMES.get(team_id, team_id)}</td>'
+                f'<td style="padding:3px 6px;font-weight:bold;color:{pos_colour};text-align:right;white-space:nowrap;">'
                 f'{_ordinal(d["position"])}<span style="color:#94a3b8;font-weight:normal;"> / {d["total"]}</span>'
                 f'{finals_dot}</td>'
                 f'</tr>'
@@ -1109,7 +1091,7 @@ def format_html(summaries, leaders=None, ladder_data=None, weekly_notes=None):
                 '<hr style="%s">' % S['rule'],
                 '<p style="%s">Season Stats</p>' % S['section'],
                 '<p style="font-size:12px;font-weight:bold;color:#475569;margin:0 0 4px 0;">Ladder</p>',
-                f'<table style="border-collapse:collapse;width:100%;margin-bottom:12px;">{ladder_rows}</table>',
+                f'<table style="border-collapse:collapse;width:100%;table-layout:fixed;margin-bottom:12px;">{ladder_rows}</table>',
             ]
 
     # ── Season leaders ────────────────────────────────────────────────────────
@@ -1129,13 +1111,13 @@ def format_html(summaries, leaders=None, ladder_data=None, weekly_notes=None):
                 bg = '#f8fafc' if i % 2 == 0 else '#ffffff'
                 rows_html += (
                     f'<tr style="background:{bg};">'
-                    f'<td style="padding:3px 6px;color:#94a3b8;font-size:12px;width:18px;">{i}</td>'
-                    f'<td style="padding:3px 6px;font-weight:500;">{p["name"]}</td>'
-                    f'<td style="padding:3px 6px;font-weight:bold;text-align:right;">{p["goals"]}</td>'
+                    f'<td style="padding:3px 6px;color:#94a3b8;font-size:12px;width:22px;vertical-align:top;">{i}</td>'
+                    f'<td style="padding:3px 6px;font-weight:500;word-wrap:break-word;overflow-wrap:break-word;">{p["name"]}</td>'
+                    f'<td style="padding:3px 6px;font-weight:bold;text-align:right;white-space:nowrap;width:36px;vertical-align:top;">{p["goals"]}</td>'
                     f'</tr>'
                 )
             parts.append(
-                f'<table style="border-collapse:collapse;width:100%;margin-bottom:4px;">'
+                f'<table style="border-collapse:collapse;width:100%;table-layout:fixed;margin-bottom:4px;">'
                 f'{rows_html}</table>'
             )
             # "Also on X goals" footer — names of players beyond top 5
@@ -1168,19 +1150,19 @@ def format_html(summaries, leaders=None, ladder_data=None, weekly_notes=None):
                 bg = '#f8fafc' if i % 2 == 0 else '#ffffff'
                 # Build individual card badges — one per card, e.g. Y Y G not Y2 G1
                 card_badges = ''
-                card_badges += (f'<span style="{S["card_y"]}">Y</span> ' * p['yellow'])
-                card_badges += (f'<span style="{S["card_g"]}">G</span> ' * p['green'])
-                card_badges += (f'<span style="{S["card_r"]}">R</span> ' * p['red'])
+                card_badges += (f'<span style="{S["card_y"]}">Y</span>' * p['yellow'])
+                card_badges += (f'<span style="{S["card_g"]}">G</span>' * p['green'])
+                card_badges += (f'<span style="{S["card_r"]}">R</span>' * p['red'])
                 card_badges = card_badges.strip()
                 rows_html += (
                     f'<tr style="background:{bg};">'
-                    f'<td style="padding:3px 6px;color:#94a3b8;font-size:12px;width:18px;">{i}</td>'
-                    f'<td style="padding:3px 6px;font-weight:500;">{p["name"]}</td>'
-                    f'<td style="padding:3px 6px;text-align:right;">{card_badges}</td>'
+                    f'<td style="padding:3px 6px;color:#94a3b8;font-size:12px;width:22px;vertical-align:top;">{i}</td>'
+                    f'<td style="padding:3px 6px;font-weight:500;word-wrap:break-word;overflow-wrap:break-word;">{p["name"]}</td>'
+                    f'<td style="padding:3px 4px 3px 6px;text-align:right;vertical-align:middle;">{card_badges}</td>'
                     f'</tr>'
                 )
             parts.append(
-                f'<table style="border-collapse:collapse;width:100%;margin-bottom:4px;">'
+                f'<table style="border-collapse:collapse;width:100%;table-layout:fixed;margin-bottom:4px;">'
                 f'{rows_html}</table>'
             )
             # "Also" footer for cards — show name + their badges inline
@@ -1189,9 +1171,9 @@ def format_html(summaries, leaders=None, ladder_data=None, weekly_notes=None):
                 also_parts = []
                 for p in also:
                     badges = ''
-                    badges += (f'<span style="{S["card_y"]}">Y</span> ' * p['yellow'])
-                    badges += (f'<span style="{S["card_g"]}">G</span> ' * p['green'])
-                    badges += (f'<span style="{S["card_r"]}">R</span> ' * p['red'])
+                    badges += (f'<span style="{S["card_y"]}">Y</span>' * p['yellow'])
+                    badges += (f'<span style="{S["card_g"]}">G</span>' * p['green'])
+                    badges += (f'<span style="{S["card_r"]}">R</span>' * p['red'])
                     also_parts.append(f'{p["name"]} {badges.strip()}')
                 also_html = ' &nbsp;·&nbsp; '.join(also_parts)
                 parts.append(
@@ -1755,6 +1737,633 @@ def _consolidate(matched):
         base['day'] = final_day
         result.append(base)
     return result
+
+
+# ── autoSyncUnavailability ────────────────────────────────────────────────────
+# Called by Apps Script onChange trigger — no Firebase ID token needed.
+# Auth via shared secret stored in Firebase Secret Manager as AUTO_SYNC_SECRET.
+#
+# Behaviour:
+#   • Exact + fuzzy matches → written directly to Firestore playerUnavailability
+#   • Ignored names (config/unavailIgnoredNames) → silently skipped
+#   • Unmatched names → queued in config/unavailUnmatchedNames for admin review
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _require_sync_secret(req) -> tuple[bool, str]:
+    """Validate the shared secret sent by Apps Script."""
+    auth_header = req.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return False, 'Missing Authorization header'
+    provided = auth_header[len('Bearer '):].strip()
+    expected = os.environ.get('AUTO_SYNC_SECRET', '')
+    if not expected:
+        return False, 'AUTO_SYNC_SECRET not configured on server'
+    if provided != expected:
+        return False, 'Invalid sync secret'
+    return True, ''
+
+PUBLIC_UNAVAIL_ALLOWED_DAYS = {'sat', 'sun', 'both'}
+
+def _public_unavail_cors(methods='POST, OPTIONS'):
+    return {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': methods,
+        'Access-Control-Allow-Headers': 'Content-Type',
+    }
+
+def _normalise_public_email(value):
+    return str(value or '').strip().lower()
+
+def _valid_public_email(value):
+    return bool(re.match(r'^[^\s@]+@[^\s@]+\.[^\s@]+$', value or ''))
+
+def _public_email_doc_id(value):
+    return re.sub(r'[^a-z0-9._-]', '_', _normalise_public_email(value))
+
+def _public_normalise_name(value):
+    return re.sub(r'[^a-z0-9]+', ' ', str(value or '').lower()).strip()
+
+def _public_name_match(db, name):
+    import difflib
+
+    lookup = _public_normalise_name(name)
+    if not lookup:
+        return None
+
+    players = [{'id': d.id, **d.to_dict()} for d in db.collection('players').stream()]
+    player_map = {
+        _public_normalise_name(p.get('name')): p
+        for p in players
+        if p.get('name')
+    }
+    if lookup in player_map:
+        player = player_map[lookup]
+        return {
+            'playerId': str(player['id']),
+            'playerName': player.get('name'),
+            'confidence': 'exact',
+        }
+
+    close = difflib.get_close_matches(lookup, player_map.keys(), n=1, cutoff=0.75)
+    if close:
+        player = player_map[close[0]]
+        return {
+            'playerId': str(player['id']),
+            'playerName': player.get('name'),
+            'confidence': 'fuzzy',
+        }
+    return None
+
+def _public_round_payload(db, round_id):
+    snap = db.collection('rounds').document(str(round_id)).get()
+    if not snap.exists:
+        return None
+    data = snap.to_dict() or {}
+    label = data.get('name') or (f"Round {data.get('roundNumber')}" if data.get('roundNumber') is not None else f"Round {round_id}")
+    return {
+        'round_id': str(snap.id),
+        'round_label': label,
+        'round_number': data.get('roundNumber'),
+        'sat_date': data.get('satDate') or data.get('roundDate'),
+        'sun_date': data.get('sunDate'),
+    }
+
+def _public_entry_is_editable(entry, today_str=None):
+    today_str = today_str or date.today().isoformat()
+    dates = []
+    days = entry.get('days')
+    if days in ('sat', 'both') and entry.get('sat_date'):
+        dates.append(entry.get('sat_date'))
+    if days in ('sun', 'both') and entry.get('sun_date'):
+        dates.append(entry.get('sun_date'))
+    if not dates:
+        dates = [entry.get('sat_date'), entry.get('sun_date')]
+    return any(d and str(d) >= today_str for d in dates)
+
+def _clean_public_submission(doc):
+    data = doc.to_dict() or {}
+    return {
+        'id': doc.id,
+        'name': data.get('name', ''),
+        'status': data.get('status', 'pending'),
+        'entries': data.get('entries', []),
+        'notes': data.get('notes') or '',
+        'submittedAt': data.get('submittedAt'),
+        'reviewedAt': data.get('reviewedAt'),
+        'playerName': data.get('playerName'),
+    }
+
+def _validate_public_entries(db, entries, allow_empty=False):
+    if not isinstance(entries, list) or (not allow_empty and len(entries) == 0) or len(entries) > 30:
+        return None, 'Choose between 1 and 30 rounds.'
+
+    cleaned_entries = []
+    seen_rounds = set()
+    today_str = date.today().isoformat()
+    for entry in entries:
+        round_id = str((entry or {}).get('round_id') or '').strip()
+        days = str((entry or {}).get('days') or '').strip().lower()
+        if not round_id or days not in PUBLIC_UNAVAIL_ALLOWED_DAYS:
+            return None, 'Invalid round selection.'
+        if round_id in seen_rounds:
+            continue
+        round_payload = _public_round_payload(db, round_id)
+        if not round_payload:
+            return None, 'One selected round could not be found.'
+        cleaned = {**round_payload, 'days': days}
+        if not _public_entry_is_editable(cleaned, today_str):
+            return None, 'Past rounds cannot be edited.'
+        cleaned_entries.append(cleaned)
+        seen_rounds.add(round_id)
+    return cleaned_entries, ''
+
+def _approved_public_unavailability_for_email(db, email):
+    link = db.collection('unavailabilitySubmitterLinks').document(_public_email_doc_id(email)).get()
+    if not link.exists:
+        return None
+
+    link_data = link.to_dict() or {}
+    player_id = str(link_data.get('playerId') or '').strip()
+    if not player_id:
+        return None
+
+    docs = list(
+        db.collection('playerUnavailability')
+        .where('playerId', '==', player_id)
+        .stream()
+    )
+    entries = []
+    for doc in docs:
+        data = doc.to_dict() or {}
+        round_id = str(data.get('roundId') or '').strip()
+        if not round_id:
+            continue
+        round_payload = _public_round_payload(db, round_id) or {
+            'round_id': round_id,
+            'round_label': f"Round {round_id}",
+            'round_number': None,
+            'sat_date': None,
+            'sun_date': None,
+        }
+        entries.append({**round_payload, 'days': data.get('days') or 'both'})
+
+    entries.sort(key=lambda entry: (
+        entry.get('round_number') if entry.get('round_number') is not None else 999,
+        entry.get('round_label') or '',
+    ))
+
+    if not entries:
+        return None
+
+    return {
+        'id': f"approved-{player_id}",
+        'name': link_data.get('name') or link_data.get('playerName') or '',
+        'status': 'approved',
+        'entries': entries,
+        'notes': '',
+        'submittedAt': None,
+        'reviewedAt': link_data.get('linkedAt'),
+        'playerName': link_data.get('playerName'),
+    }
+
+@https_fn.on_request(region=REGION)
+def submitPublicUnavailability(req: https_fn.Request) -> https_fn.Response:
+    """Public no-login form endpoint. Writes staged submissions only."""
+    if req.method == 'OPTIONS':
+        return https_fn.Response('', status=204, headers=_public_unavail_cors())
+    if req.method != 'POST':
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': 'POST required'}),
+            status=405, mimetype='application/json', headers=_public_unavail_cors()
+        )
+
+    body = req.get_json(silent=True) or {}
+    name = str(body.get('name') or '').strip()
+    email = _normalise_public_email(body.get('email'))
+    notes = str(body.get('notes') or '').strip()[:500]
+    entries = body.get('entries') or []
+
+    if len(name) < 2 or len(name) > 80:
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': 'Enter a valid name.'}),
+            status=400, mimetype='application/json', headers=_public_unavail_cors()
+        )
+    if not _valid_public_email(email):
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': 'Enter a valid email.'}),
+            status=400, mimetype='application/json', headers=_public_unavail_cors()
+        )
+    if not isinstance(entries, list) or len(entries) == 0 or len(entries) > 30:
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': 'Choose between 1 and 30 rounds.'}),
+            status=400, mimetype='application/json', headers=_public_unavail_cors()
+        )
+
+    db = _get_db()
+    cleaned_entries, validation_error = _validate_public_entries(db, entries)
+    if validation_error:
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': validation_error}),
+            status=400, mimetype='application/json', headers=_public_unavail_cors()
+        )
+
+    name_match = _public_name_match(db, name)
+    ref = db.collection('unavailabilitySubmissions').document()
+    now = datetime.utcnow().isoformat()
+    ref.set({
+        'name': name,
+        'email': email,
+        'emailLower': email,
+        'suggestedPlayerId': name_match.get('playerId') if name_match else None,
+        'suggestedPlayerName': name_match.get('playerName') if name_match else None,
+        'suggestedMatchConfidence': name_match.get('confidence') if name_match else None,
+        'notes': notes or None,
+        'entries': cleaned_entries,
+        'status': 'pending',
+        'source': 'public_form',
+        'submittedAt': now,
+    })
+
+    return https_fn.Response(
+        json.dumps({'ok': True, 'id': ref.id}),
+        status=200, mimetype='application/json', headers=_public_unavail_cors()
+    )
+
+@https_fn.on_request(region=REGION)
+def lookupPublicUnavailability(req: https_fn.Request) -> https_fn.Response:
+    """Returns staged submissions plus approved master entries for a linked email."""
+    if req.method == 'OPTIONS':
+        return https_fn.Response('', status=204, headers=_public_unavail_cors())
+    if req.method != 'POST':
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': 'POST required'}),
+            status=405, mimetype='application/json', headers=_public_unavail_cors()
+        )
+
+    body = req.get_json(silent=True) or {}
+    email = _normalise_public_email(body.get('email'))
+    name = str(body.get('name') or '').strip()
+    if not _valid_public_email(email):
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': 'Enter a valid email.'}),
+            status=400, mimetype='application/json', headers=_public_unavail_cors()
+        )
+
+    db = _get_db()
+    link = db.collection('unavailabilitySubmitterLinks').document(_public_email_doc_id(email)).get()
+    link_data = link.to_dict() if link.exists else {}
+    name_match = _public_name_match(db, name)
+    docs = list(
+        db.collection('unavailabilitySubmissions')
+        .where('emailLower', '==', email)
+        .limit(20)
+        .stream()
+    )
+    submissions = [
+        submission for submission in (_clean_public_submission(doc) for doc in docs)
+        if submission.get('status') == 'pending'
+    ]
+    approved = _approved_public_unavailability_for_email(db, email)
+    if approved:
+        submissions.append(approved)
+    submissions.sort(key=lambda item: item.get('submittedAt') or '', reverse=True)
+
+    return https_fn.Response(
+        json.dumps({
+            'ok': True,
+            'submissions': submissions,
+            'linkedPlayerName': link_data.get('playerName'),
+            'linkedPlayerId': link_data.get('playerId'),
+            'suggestedPlayerName': name_match.get('playerName') if name_match else '',
+            'suggestedPlayerId': name_match.get('playerId') if name_match else '',
+            'suggestedMatchConfidence': name_match.get('confidence') if name_match else '',
+        }),
+        status=200, mimetype='application/json', headers=_public_unavail_cors()
+    )
+
+@https_fn.on_request(region=REGION)
+def updatePublicUnavailability(req: https_fn.Request) -> https_fn.Response:
+    """Updates staged public submissions while keeping all changes admin-reviewed."""
+    if req.method == 'OPTIONS':
+        return https_fn.Response('', status=204, headers=_public_unavail_cors())
+    if req.method != 'POST':
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': 'POST required'}),
+            status=405, mimetype='application/json', headers=_public_unavail_cors()
+        )
+
+    body = req.get_json(silent=True) or {}
+    email = _normalise_public_email(body.get('email'))
+    submission_id = str(body.get('submission_id') or '').strip()
+    name = str(body.get('name') or '').strip()
+    notes = str(body.get('notes') or '').strip()[:500]
+    entries = body.get('entries') or []
+
+    if not _valid_public_email(email):
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': 'Enter a valid email.'}),
+            status=400, mimetype='application/json', headers=_public_unavail_cors()
+        )
+    if len(name) < 2 or len(name) > 80:
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': 'Enter a valid name.'}),
+            status=400, mimetype='application/json', headers=_public_unavail_cors()
+        )
+    if not submission_id:
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': 'Entry not found.'}),
+            status=400, mimetype='application/json', headers=_public_unavail_cors()
+        )
+
+    db = _get_db()
+    cleaned_entries, validation_error = _validate_public_entries(db, entries, allow_empty=True)
+    if validation_error:
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': validation_error}),
+            status=400, mimetype='application/json', headers=_public_unavail_cors()
+        )
+
+    now = datetime.utcnow().isoformat()
+
+    if submission_id == 'current':
+        link = db.collection('unavailabilitySubmitterLinks').document(_public_email_doc_id(email)).get()
+        link_data = link.to_dict() if link.exists else {}
+        player_id = str(link_data.get('playerId') or '').strip()
+        linked_player_name = str(link_data.get('playerName') or '').strip()
+
+        pending_docs = list(
+            db.collection('unavailabilitySubmissions')
+            .where('emailLower', '==', email)
+            .stream()
+        )
+        pending_docs = [
+            doc_snap for doc_snap in pending_docs
+            if (doc_snap.to_dict() or {}).get('status') == 'pending'
+        ]
+
+        if pending_docs:
+            primary = pending_docs[0]
+            primary_data = primary.to_dict() or {}
+            batch = db.batch()
+            if cleaned_entries:
+                payload = {
+                    'name': name,
+                    'email': email,
+                    'emailLower': email,
+                    'notes': notes or None,
+                    'entries': cleaned_entries,
+                    'status': 'pending',
+                    'source': 'public_form',
+                    'updatedAt': now,
+                }
+                if primary_data.get('submittedAt'):
+                    payload['submittedAt'] = primary_data.get('submittedAt')
+                else:
+                    payload['submittedAt'] = now
+                if player_id:
+                    payload['suggestedPlayerId'] = player_id
+                    payload['suggestedPlayerName'] = linked_player_name or None
+                    payload['suggestedMatchConfidence'] = 'linked'
+                batch.set(primary.reference, payload, merge=True)
+            else:
+                batch.update(primary.reference, {
+                    'status': 'withdrawn',
+                    'withdrawnAt': now,
+                    'updatedAt': now,
+                })
+            for doc_snap in pending_docs[1:]:
+                batch.update(doc_snap.reference, {
+                    'status': 'withdrawn',
+                    'withdrawnAt': now,
+                    'updatedAt': now,
+                })
+            batch.commit()
+        elif cleaned_entries:
+            payload = {
+                'name': name,
+                'email': email,
+                'emailLower': email,
+                'notes': notes or None,
+                'entries': cleaned_entries,
+                'status': 'pending',
+                'source': 'public_form',
+                'submittedAt': now,
+            }
+            if player_id:
+                payload['suggestedPlayerId'] = player_id
+                payload['suggestedPlayerName'] = linked_player_name or None
+                payload['suggestedMatchConfidence'] = 'linked'
+            db.collection('unavailabilitySubmissions').document().set(payload)
+
+        return https_fn.Response(
+            json.dumps({'ok': True}),
+            status=200, mimetype='application/json', headers=_public_unavail_cors()
+        )
+
+    if not submission_id.startswith('approved-'):
+        ref = db.collection('unavailabilitySubmissions').document(submission_id)
+        snap = ref.get()
+        data = snap.to_dict() if snap.exists else {}
+        if not snap.exists or data.get('status') != 'pending' or data.get('emailLower') != email:
+            return https_fn.Response(
+                json.dumps({'ok': False, 'error': 'Only pending entries for this email can be edited.'}),
+                status=403, mimetype='application/json', headers=_public_unavail_cors()
+            )
+        past_entries = [
+            entry for entry in (data.get('entries') or [])
+            if not _public_entry_is_editable(entry)
+        ]
+        entries_to_store = past_entries + cleaned_entries
+        if entries_to_store:
+            ref.update({
+                'name': name,
+                'notes': notes or None,
+                'entries': entries_to_store,
+                'updatedAt': now,
+            })
+        else:
+            ref.update({
+                'status': 'withdrawn',
+                'withdrawnAt': now,
+                'updatedAt': now,
+            })
+        return https_fn.Response(
+            json.dumps({'ok': True}),
+            status=200, mimetype='application/json', headers=_public_unavail_cors()
+        )
+
+    link = db.collection('unavailabilitySubmitterLinks').document(_public_email_doc_id(email)).get()
+    link_data = link.to_dict() if link.exists else {}
+    player_id = str(link_data.get('playerId') or '').strip()
+    if not player_id:
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': 'Approved entries are not linked to this email yet.'}),
+            status=403, mimetype='application/json', headers=_public_unavail_cors()
+        )
+
+    existing = list(
+        db.collection('playerUnavailability')
+        .where('playerId', '==', player_id)
+        .stream()
+    )
+    editable_existing = []
+    for doc_snap in existing:
+        data = doc_snap.to_dict() or {}
+        round_payload = _public_round_payload(db, data.get('roundId'))
+        if round_payload and _public_entry_is_editable({**round_payload, 'days': data.get('days') or 'both'}):
+            editable_existing.append(doc_snap)
+
+    batch = db.batch()
+    for doc_snap in editable_existing:
+        batch.delete(doc_snap.reference)
+    for entry in cleaned_entries:
+        round_id = str(entry['round_id'])
+        doc_ref = db.collection('playerUnavailability').document(f'{round_id}_{player_id}')
+        batch.set(doc_ref, {
+            'playerId': player_id,
+            'roundId': round_id,
+            'days': entry['days'],
+            'notes': notes or None,
+            'source': 'public_form',
+            'submittedByName': name,
+            'submittedByEmail': email,
+            'updatedAt': now,
+        }, merge=True)
+    batch.commit()
+
+    return https_fn.Response(
+        json.dumps({'ok': True}),
+        status=200, mimetype='application/json', headers=_public_unavail_cors()
+    )
+
+@https_fn.on_request(region=REGION, secrets=['AUTO_SYNC_SECRET'])
+def autoSyncUnavailability(req: https_fn.Request) -> https_fn.Response:
+    """
+    Triggered by Apps Script onChange on the unavailability sheet.
+    Writes direct/fuzzy matches immediately; queues unmatched for admin review.
+    """
+    if req.method == 'OPTIONS':
+        return https_fn.Response('', status=204, headers={
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        })
+    cors_headers = {'Access-Control-Allow-Origin': '*'}
+
+    ok, reason = _require_sync_secret(req)
+    if not ok:
+        return https_fn.Response(
+            json.dumps({'error': reason}), status=401,
+            mimetype='application/json', headers=cors_headers
+        )
+
+    db = _get_db()
+    today_str = date.today().isoformat()
+
+    # 1. Fetch + parse sheet
+    try:
+        token = _sheets_token()
+        values = _fetch_sheet(token)
+    except Exception as e:
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': str(e)}),
+            status=500, mimetype='application/json', headers=cors_headers
+        )
+
+    entries = _parse_sheet(values, today_str)
+
+    # 2. Load players, aliases, ignored names
+    players = [{'id': d.id, **d.to_dict()}
+               for d in db.collection('players').stream()]
+
+    aliases_doc = db.collection('config').document('nameAliases').get()
+    aliases = aliases_doc.to_dict() if aliases_doc.exists else {}
+
+    ignored_doc = db.collection('config').document('unavailIgnoredNames').get()
+    ignored = set(ignored_doc.to_dict().get('names', []) if ignored_doc.exists else [])
+
+    # 3. Filter out ignored names before matching
+    entries = [e for e in entries if e['sheet_name'] not in ignored]
+
+    # 4. Match players
+    matched, unmatched = _match_players(entries, players, aliases)
+    matched = _consolidate(matched)
+
+    # 5. Write matched entries to Firestore
+    batch = db.batch()
+    written = 0
+    seen_by_round = {}
+
+    for m in matched:
+        round_doc = _get_round_for_date(db, m['date'])
+        if not round_doc:
+            continue
+
+        round_id  = round_doc['id']
+        player_id = str(m['player']['id'])
+
+        doc_ref = db.collection('playerUnavailability').document(f'{round_id}_{player_id}')
+        batch.set(doc_ref, {
+            'playerId':   player_id,
+            'roundId':    round_id,
+            'days':       m['day'],
+            'source':     'auto_sync',
+            'syncedAt':   datetime.utcnow().isoformat(),
+        }, merge=True)
+
+        # Track seen names per round so manual sync knows what's new
+        if round_id not in seen_by_round:
+            seen_by_round[round_id] = set(_get_seen_names(db, round_id))
+        seen_by_round[round_id].add(m['sheet_name'])
+        written += 1
+
+    for round_id, names in seen_by_round.items():
+        sync_ref = db.collection('unavailabilitySyncs').document(round_id)
+        batch.set(sync_ref, {
+            'seenNames':  list(names),
+            'lastSynced': datetime.utcnow().isoformat(),
+        }, merge=True)
+
+    batch.commit()
+
+    # 6. Queue unmatched names for admin review
+    # Deduplicate by (sheet_name, round_id) — same person can appear across multiple rounds
+    if unmatched:
+        queue_ref = db.collection('config').document('unavailUnmatchedNames')
+        queue_doc = queue_ref.get()
+        existing  = queue_doc.to_dict().get('names', []) if queue_doc.exists else []
+
+        existing_keys = {(e['sheet_name'], e.get('round_id', '')) for e in existing}
+        new_entries = []
+        for u in unmatched:
+            round_doc = _get_round_for_date(db, u['date'])
+            round_id  = round_doc['id'] if round_doc else None
+            key = (u['sheet_name'], str(round_id) if round_id else '')
+            if key not in existing_keys:
+                existing_keys.add(key)
+                new_entries.append({
+                    'sheet_name': u['sheet_name'],
+                    'date':       u['date'],
+                    'day':        u['day'],
+                    'round_id':   str(round_id) if round_id else None,
+                    'queuedAt':   datetime.utcnow().isoformat(),
+                })
+
+        if new_entries:
+            queue_ref.set(
+                {'names': existing + new_entries},
+                merge=True
+            )
+
+    return https_fn.Response(
+        json.dumps({
+            'ok':       True,
+            'written':  written,
+            'unmatched': len(unmatched),
+            'ignored':  len(ignored),
+        }),
+        status=200, mimetype='application/json', headers=cors_headers
+    )
 
 
 # ── syncUnavailability ────────────────────────────────────────────────────────

@@ -1,30 +1,67 @@
-// src/components/LoginPage.jsx — Magic link sign-in screen
-// Shows the Mentone panther with a tongue-in-cheek "no entry" message
-// and an email input to request a magic link.
-
 import { useState } from 'react'
-import { sendMagicLink } from '../auth'
+import { sendPasswordReset, signInWithEmailPassword, signInWithGoogle, signOutUser } from '../auth'
 
-export default function LoginPage() {
+export default function LoginPage({ deniedUser = null, accessError = '' }) {
   const [email, setEmail]     = useState('')
-  const [sent, setSent]       = useState(false)
+  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
+  const [resetSent, setResetSent] = useState(false)
   const [error, setError]     = useState('')
 
   const handleSubmit = async () => {
-    if (!email.trim()) return
+    if (!email.trim() || !password) return
     setLoading(true)
     setError('')
+    setResetSent(false)
     try {
-      await sendMagicLink(email.trim().toLowerCase())
-      setSent(true)
+      await signInWithEmailPassword(email.trim().toLowerCase(), password)
     } catch (e) {
-      console.error('Magic link error:', e.code, e.message)
-      const msg = e.code === 'auth/operation-not-allowed'
-        ? 'Email link sign-in is not enabled — check Firebase Console.'
-        : e.code === 'auth/invalid-email'
+      console.error('Email sign-in error:', e.code, e.message)
+      const msg = e.code === 'auth/invalid-email'
         ? 'Invalid email address.'
-        : `Error: ${e.message}`
+        : e.code === 'auth/invalid-credential' || e.code === 'auth/user-not-found' || e.code === 'auth/wrong-password'
+          ? 'Email or password is incorrect.'
+          : e.code === 'auth/operation-not-allowed'
+            ? 'Email/password sign-in is not enabled in Firebase.'
+            : `Error: ${e.message}`
+      setError(msg)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleGoogle = async () => {
+    setLoading(true)
+    setError('')
+    setResetSent(false)
+    try {
+      await signInWithGoogle()
+    } catch (e) {
+      console.error('Google sign-in error:', e.code, e.message)
+      setError(`Google sign-in failed: ${e.message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleReset = async () => {
+    if (!email.trim()) {
+      setError('Enter your email first, then use forgot password.')
+      return
+    }
+    setLoading(true)
+    setError('')
+    setResetSent(false)
+    try {
+      await sendPasswordReset(email.trim().toLowerCase())
+      setResetSent(true)
+    } catch (e) {
+      console.error('Password reset error:', e.code, e.message)
+      const msg = e.code === 'auth/invalid-email'
+        ? 'Invalid email address.'
+        : e.code === 'auth/user-not-found'
+          ? 'No password account exists for that email yet.'
+          : `Error: ${e.message}`
       setError(msg)
     } finally {
       setLoading(false)
@@ -32,84 +69,119 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-6 py-12"
+    <div className="min-h-screen flex flex-col items-center justify-center px-6 py-6 sm:py-12"
          style={{ background: '#0f172a' }}>
 
-      {/* Gold top bar */}
       <div className="fixed top-0 left-0 right-0 h-1" style={{ background: '#eab308' }} />
 
-      {/* Panther */}
       <img
         src="/panther.png"
         alt="Mentone Hockey Club panther"
-        className="w-48 h-48 sm:w-64 sm:h-64 object-contain mb-6 select-none"
+        className="w-32 h-32 sm:w-64 sm:h-64 object-contain mb-3 sm:mb-6 select-none"
         draggable={false}
       />
 
-      {/* Heading */}
-      <h1 className="text-3xl sm:text-4xl font-black text-white text-center mb-2 tracking-tight">
+      <h1 className="text-2xl sm:text-4xl font-black text-white text-center mb-1 sm:mb-2 tracking-tight">
         MHC Squad Tracker
       </h1>
 
-      {/* Tongue-in-cheek message */}
-      <div className="text-center mb-8 space-y-1">
-        <p className="text-yellow-400 font-bold text-lg">
-          🐾 You are not Mentone Hockey security cleared.
+      <div className="text-center mb-4 sm:mb-8 space-y-0.5 sm:space-y-1">
+        <p className="text-yellow-400 font-bold text-base sm:text-lg">
+          Members only
         </p>
-        <p className="text-slate-400 text-sm">
-          Members only beyond this point. The panther is watching.
+        <p className="text-slate-400 text-xs sm:text-sm">
+          Sign in with an approved tracker email.
         </p>
       </div>
 
-      {/* Sign-in card */}
-      {!sent ? (
-        <div className="w-full max-w-sm bg-white/5 border border-white/10 rounded-xl p-6 space-y-4">
-          <p className="text-slate-300 text-sm text-center">
-            Enter your email — we'll send you a magic link. No password required.
+      {deniedUser && (
+        <div className="mb-3 sm:mb-4 w-full max-w-sm rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 sm:p-4 text-center">
+          <p className="text-sm font-semibold text-amber-200">Access not approved</p>
+          <p className="mt-1 text-xs text-amber-100/80">
+            {deniedUser.email} is signed in, but is not on the tracker access list.
           </p>
-          <input
-            type="email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-            placeholder="your@email.com"
-            className="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20
-                       text-white placeholder-slate-500 text-sm
-                       focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400"
-            autoComplete="email"
-            autoCapitalize="off"
-          />
-          {error && <p className="text-red-400 text-xs text-center">{error}</p>}
+          {accessError && (
+            <p className="mt-2 text-xs text-red-200">{accessError}</p>
+          )}
           <button
-            onClick={handleSubmit}
-            disabled={loading || !email.trim()}
-            className="w-full py-3 rounded-lg font-bold text-sm transition-colors
-                       disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ background: '#eab308', color: '#0f172a' }}
+            type="button"
+            onClick={signOutUser}
+            className="mt-2 sm:mt-3 text-xs font-semibold text-yellow-300 hover:underline"
           >
-            {loading ? 'Sending…' : 'Send magic link'}
+            Sign out and try another account
           </button>
-        </div>
-      ) : (
-        <div className="w-full max-w-sm bg-white/5 border border-green-500/30 rounded-xl p-6 text-center space-y-2">
-          <p className="text-2xl">📬</p>
-          <p className="text-white font-bold">Check your inbox</p>
-          <p className="text-slate-400 text-sm">
-            We sent a sign-in link to <span className="text-white">{email}</span>.
-            Click it to access the app.
-          </p>
-          <p className="text-slate-500 text-xs pt-2">
-            Wrong email?{' '}
-            <button onClick={() => { setSent(false); setEmail('') }}
-                    className="text-yellow-400 hover:underline">
-              Try again
-            </button>
-          </p>
         </div>
       )}
 
-      {/* Footer */}
-      <p className="mt-10 text-slate-600 text-xs text-center">
+      <div className="w-full max-w-sm bg-white/5 border border-white/10 rounded-xl p-4 sm:p-6 space-y-3 sm:space-y-4">
+        <button
+          type="button"
+          onClick={handleGoogle}
+          disabled={loading}
+          className="w-full rounded-lg border border-white/15 bg-white/10 px-4 py-2.5 sm:py-3 text-sm font-bold text-white transition-colors hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Sign in with Google
+        </button>
+
+        <div className="flex items-center gap-3">
+          <div className="h-px flex-1 bg-white/10" />
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">or</span>
+          <div className="h-px flex-1 bg-white/10" />
+        </div>
+
+        <input
+          type="email"
+          value={email}
+          onChange={e => setEmail(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+          placeholder="your@email.com"
+          className="w-full px-4 py-2.5 sm:py-3 rounded-lg bg-white/10 border border-white/20
+                     text-white placeholder-slate-500 text-sm
+                     focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400"
+          autoComplete="email"
+          autoCapitalize="off"
+        />
+        <input
+          type="password"
+          value={password}
+          onChange={e => setPassword(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+          placeholder="Password"
+          className="w-full px-4 py-2.5 sm:py-3 rounded-lg bg-white/10 border border-white/20
+                     text-white placeholder-slate-500 text-sm
+                     focus:outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400"
+          autoComplete="current-password"
+        />
+
+        {error && <p className="text-red-400 text-xs text-center">{error}</p>}
+        {resetSent && (
+          <p className="text-green-300 text-xs text-center">
+            Password reset email sent. Check your inbox.
+          </p>
+        )}
+
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={loading || !email.trim() || !password}
+          className="w-full py-2.5 sm:py-3 rounded-lg font-bold text-sm transition-colors
+                     disabled:opacity-40 disabled:cursor-not-allowed"
+          style={{ background: '#eab308', color: '#0f172a' }}
+        >
+          {loading ? 'Signing in...' : 'Sign in'}
+        </button>
+
+        <button
+          type="button"
+          onClick={handleReset}
+          disabled={loading || !email.trim()}
+          className="w-full text-xs font-semibold text-yellow-400 hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Forgot password?
+        </button>
+      </div>
+
+      <p className="mt-6 sm:mt-10 text-slate-600 text-xs text-center">
         Mentone Hockey Club · 2026 Season
       </p>
     </div>

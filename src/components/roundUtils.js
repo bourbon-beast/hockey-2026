@@ -77,35 +77,59 @@ export const buildTeamCanvas = (tid, match, players, roundLabel, duplicateIds = 
     ctx.fillStyle = '#f1f5f9'
     ctx.fillRect(0, 0, W, totalH)
 
-    // Club header
-    ctx.fillStyle = '#0f172a'
+    // Club header — closer to the planner team cards, but still export-friendly
+    const clubGrad = ctx.createLinearGradient(0, 0, W, CLUB_H)
+    clubGrad.addColorStop(0, '#071827')
+    clubGrad.addColorStop(0.58, '#0f2f49')
+    clubGrad.addColorStop(1, '#132f55')
+    ctx.fillStyle = clubGrad
     ctx.fillRect(0, 0, W, CLUB_H)
+    ctx.fillStyle = '#eab308'
+    ctx.fillRect(0, 0, W, 4)
+    const clubGlow = ctx.createRadialGradient(W - 70, -18, 8, W - 70, -18, 170)
+    clubGlow.addColorStop(0, 'rgba(96,165,250,0.32)')
+    clubGlow.addColorStop(1, 'rgba(96,165,250,0)')
+    ctx.fillStyle = clubGlow
+    ctx.fillRect(0, 0, W, CLUB_H)
+    ctx.fillStyle = 'rgba(255,255,255,0.10)'
+    ctx.fillRect(0, CLUB_H - 1, W, 1)
     ctx.fillStyle = '#ffffff'
     ctx.font = 'bold 24px system-ui, -apple-system, sans-serif'
     ctx.fillText('MENTONE HOCKEY CLUB', PAD, 34)
-    ctx.fillStyle = '#94a3b8'
+    ctx.fillStyle = '#cbd5e1'
     ctx.font = '15px system-ui, -apple-system, sans-serif'
     ctx.fillText(`Men's Section  ·  ${roundLabel}`, PAD, 58)
-    ctx.fillStyle = '#475569'
+    ctx.fillStyle = 'rgba(226,232,240,0.62)'
     ctx.font = '13px system-ui, -apple-system, sans-serif'
     ctx.fillText('Team Sheet', PAD, 78)
 
     // Team name bar — no count badges
     const ty = CLUB_H
-    ctx.fillStyle = '#1d4ed8'
+    const teamGrad = ctx.createLinearGradient(0, ty, W, ty + TEAM_H)
+    teamGrad.addColorStop(0, '#2b55dc')
+    teamGrad.addColorStop(0.62, '#2447c7')
+    teamGrad.addColorStop(1, '#1e3a8a')
+    ctx.fillStyle = teamGrad
     ctx.fillRect(0, ty, W, TEAM_H)
+    ctx.fillStyle = 'rgba(255,255,255,0.12)'
+    ctx.fillRect(0, ty, W, 1)
+    ctx.fillStyle = 'rgba(4,28,44,0.16)'
+    ctx.fillRect(0, ty + TEAM_H - 2, W, 2)
     ctx.fillStyle = '#ffffff'
     ctx.font = 'bold 30px system-ui, -apple-system, sans-serif'
     ctx.fillText(tid, PAD, ty + 34)
-    ctx.fillStyle = '#bfdbfe'
+    ctx.fillStyle = '#dbeafe'
     ctx.font = '16px system-ui, -apple-system, sans-serif'
     ctx.fillText(TEAM_FULL_NAMES[tid] || '', PAD, ty + 56)
 
-    // Match info block
+    // Match info block — dark like the in-app team-card header
     const mi_y = CLUB_H + TEAM_H
-    ctx.fillStyle = '#ffffff'
+    const infoGrad = ctx.createLinearGradient(0, mi_y, W, mi_y + INFO_H)
+    infoGrad.addColorStop(0, '#17243a')
+    infoGrad.addColorStop(1, '#0f172a')
+    ctx.fillStyle = infoGrad
     ctx.fillRect(0, mi_y, W, INFO_H)
-    ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1
+    ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.lineWidth = 1
     ctx.beginPath(); ctx.moveTo(0, mi_y); ctx.lineTo(W, mi_y); ctx.stroke()
 
     const dateStr = (() => {
@@ -134,25 +158,29 @@ export const buildTeamCanvas = (tid, match, players, roundLabel, duplicateIds = 
     infoLines.forEach((line, i) => {
         const ly = mi_y + 20 + i * INFO_LINE_H
         // Alternating subtle row bg
-        ctx.fillStyle = i % 2 === 0 ? '#ffffff' : '#f8fafc'
+        ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.035)' : 'rgba(255,255,255,0.015)'
         ctx.fillRect(0, mi_y + i * INFO_LINE_H, W, INFO_LINE_H)
         // Label
-        ctx.fillStyle = '#94a3b8'
+        ctx.fillStyle = 'rgba(191,219,254,0.52)'
         ctx.font = 'bold 10px system-ui, -apple-system, sans-serif'
         ctx.fillText(line.label, PAD, ly)
         // Value
-        ctx.fillStyle = '#0f172a'
+        ctx.fillStyle = '#f8fafc'
         ctx.font = 'bold 15px system-ui, -apple-system, sans-serif'
         ctx.fillText(line.value, PAD + LABEL_W, ly)
-    })
 
-    // Kit swatches
-    const kitY = mi_y + INFO_H - 18
-    ctx.fillStyle = topCol === 'blue' ? '#2563eb' : '#e2e8f0'
-    cRR(ctx, W - PAD - 42, kitY - 12, 17, 17, 4); ctx.fill()
-    if (topCol === 'white') { ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1; ctx.stroke() }
-    ctx.fillStyle = socksCol === 'yellow' ? '#facc15' : '#2563eb'
-    cRR(ctx, W - PAD - 21, kitY - 12, 17, 17, 4); ctx.fill()
+        if (line.label === 'KIT') {
+            const textW = ctx.measureText(line.value).width
+            const swatchY = ly - 13
+            let swatchX = PAD + LABEL_W + textW + 12
+            ctx.fillStyle = topCol === 'blue' ? '#2563eb' : '#e2e8f0'
+            cRR(ctx, swatchX, swatchY, 15, 15, 4); ctx.fill()
+            if (topCol === 'white') { ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1; ctx.stroke() }
+            swatchX += 20
+            ctx.fillStyle = socksCol === 'yellow' ? '#facc15' : '#2563eb'
+            cRR(ctx, swatchX, swatchY, 15, 15, 4); ctx.fill()
+        }
+    })
 
     // Player rows
     const pl_y = mi_y + INFO_H

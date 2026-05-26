@@ -17,11 +17,22 @@ const toDays = (sat, sun) => {
   return null
 }
 
+const todayKey = () => new Date().toISOString().slice(0, 10)
+
+const isCurrentOrFutureRound = (round) => {
+  const today = todayKey()
+  return [round.sat_date, round.sun_date]
+    .filter(Boolean)
+    .some(date => String(date) >= today)
+}
+
 export default function UnavailabilityManager({ onSelectPlayer }) {
   const [rounds, setRounds]           = useState([])
   const [allPlayers, setAllPlayers]   = useState([])
   const [unavailMap, setUnavailMap]   = useState({}) // "playerId:roundId" → 'sat'|'sun'|'both'
   const [loading, setLoading]         = useState(true)
+  const [copyState, setCopyState]     = useState('idle')
+  const [showPastRounds, setShowPastRounds] = useState(false)
 
   const [pickerRound, setPickerRound]       = useState(null)
   const [pickerSearch, setPickerSearch]     = useState('')
@@ -104,8 +115,24 @@ export default function UnavailabilityManager({ onSelectPlayer }) {
     }))
   }
 
-  const row1 = rounds.slice(0, 11)
-  const row2 = rounds.slice(11)
+  const publicFormUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}/unavailable`
+    : '/unavailable'
+
+  const copyPublicFormLink = async () => {
+    try {
+      await navigator.clipboard.writeText(publicFormUrl)
+      setCopyState('copied')
+    } catch {
+      setCopyState('failed')
+    }
+    setTimeout(() => setCopyState('idle'), 2500)
+  }
+
+  const visibleRounds = showPastRounds ? rounds : rounds.filter(isCurrentOrFutureRound)
+  const pastRoundCount = rounds.length - rounds.filter(isCurrentOrFutureRound).length
+  const row1 = visibleRounds.slice(0, 11)
+  const row2 = visibleRounds.slice(11)
 
   if (loading) return (
     <div className="flex items-center justify-center h-64 text-slate-500">Loading…</div>
@@ -216,7 +243,7 @@ export default function UnavailabilityManager({ onSelectPlayer }) {
     <div className="p-3 sm:p-4 space-y-4">
 
       {/* Page header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-base font-semibold text-slate-800">Unavailability</h2>
           <p className="text-xs text-slate-500 mt-0.5">
@@ -224,8 +251,37 @@ export default function UnavailabilityManager({ onSelectPlayer }) {
             Toggle Sat / Sun independently per player.
           </p>
         </div>
-        <div className="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded">
-          {Object.keys(unavailMap).length} entr{Object.keys(unavailMap).length !== 1 ? 'ies' : 'y'}
+        <div className="flex flex-col items-stretch gap-2 sm:items-end">
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto sm:justify-end">
+            {pastRoundCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowPastRounds(v => !v)}
+                className="rounded bg-white px-2 py-1 text-xs font-semibold text-slate-500 border border-slate-200 hover:bg-slate-50"
+              >
+                {showPastRounds ? 'Hide past' : `Show past (${pastRoundCount})`}
+              </button>
+            )}
+            <div className="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded">
+              {Object.keys(unavailMap).length} entr{Object.keys(unavailMap).length !== 1 ? 'ies' : 'y'}
+            </div>
+          </div>
+          <div className="flex items-center gap-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">Public form</span>
+            <button
+              type="button"
+              onClick={copyPublicFormLink}
+              className={`rounded-md px-2.5 py-1.5 text-xs font-semibold text-white transition-colors ${
+                copyState === 'copied'
+                  ? 'bg-green-600'
+                  : copyState === 'failed'
+                    ? 'bg-red-600'
+                    : 'bg-blue-600 hover:bg-blue-700'
+              }`}
+            >
+              {copyState === 'copied' ? '✓ Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy link'}
+            </button>
+          </div>
         </div>
       </div>
 

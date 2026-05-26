@@ -1,5 +1,16 @@
 import { useState, useEffect } from 'react'
 import { getPlayers, createPlayer } from '../db'
+import PageHeader from './PageHeader'
+
+/** Weighted card points — matches digest `_build_leaders` CARD_WEIGHTS in functions/main.py */
+function cardPoints(s26) {
+  if (!s26) return 0
+  return (
+    (s26.greenCards || 0) * 1 +
+    (s26.yellowCards || 0) * 2 +
+    (s26.redCards || 0) * 3
+  )
+}
 
 // ── Add Player Modal ────────────────────────────────────────────────────────
 function AddPlayerModal({ teams, statuses, onSave, onClose }) {
@@ -151,6 +162,7 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
       if (sortBy === 'team')   cmp = (a.assigned_team_id_2026 || '').localeCompare(b.assigned_team_id_2026 || '')
       if (sortBy === 'games')  cmp = (b.total_games_2026 || 0) - (a.total_games_2026 || 0)
       if (sortBy === 'goals')  cmp = (b.stats_2026?.goals || 0) - (a.stats_2026?.goals || 0)
+      if (sortBy === 'cardPts') cmp = cardPoints(b.stats_2026) - cardPoints(a.stats_2026)
       if (sortBy === 'status') cmp = a.status_id.localeCompare(b.status_id)
       return sortDir === 'asc' ? cmp : -cmp
     })
@@ -178,20 +190,22 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
   const inactiveCount = players.filter(p => p.is_active === 0).length
 
   return (
-    <div>
-      {/* Header row */}
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-gray-800">All Players</h2>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
-        >
-          <span className="text-lg leading-none">+</span> Add Player
-        </button>
-      </div>
+    <div className="space-y-4">
+      <PageHeader
+        title="All Players"
+        description="Search, filter and maintain the 2026 player list"
+        actions={
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
+          >
+            <span className="text-lg leading-none">+</span> Add Player
+          </button>
+        }
+      />
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-2 mb-4 items-center">
+      <div className="flex flex-wrap gap-2 items-center rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
         <input
           type="text"
           placeholder="Search by name..."
@@ -246,8 +260,8 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <table className="w-full">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto shadow-sm">
+        <table className="w-full min-w-[760px]">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
               <SortHeader col="name">Name</SortHeader>
@@ -255,7 +269,7 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
               <SortHeader col="team">2026 Team</SortHeader>
               <SortHeader col="games">GP</SortHeader>
               <SortHeader col="goals">Goals</SortHeader>
-              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Cards</th>
+              <SortHeader col="cardPts">Cards</SortHeader>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">

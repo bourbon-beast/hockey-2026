@@ -1,13 +1,44 @@
 // src/components/VotingPage.jsx
-// Public, no-login anonymous voting page. URL: /vote/:roundId/:teamId
+// Public, no-login anonymous voting page. URL: /vote/:teamId/:roundKey
 // Players assign 3, 2, 1 points to three different teammates then submit.
 
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
-import { getVoteSession, submitVote } from '../db.votes'
+import { getRounds } from '../db'
+import { getVoteSession, submitVote, voteSessionId } from '../db.votes'
+import { isValidVoteTeamId, resolveRoundIdFromKey } from '../voteUrl'
+
+const MEDAL = {
+  3: { label: '3 pts', tone: '#F1B434', fg: '#041C2C', eyebrow: 'Best on ground' },
+  2: { label: '2 pts', tone: '#94A3B8', fg: '#ffffff', eyebrow: 'Second' },
+  1: { label: '1 pt', tone: '#CD7F32', fg: '#ffffff', eyebrow: 'Third' },
+}
+
+function formatDate(value) {
+  if (!value) return ''
+  const date = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  }).format(date)
+}
+
+function Layout({ children, centre = false }) {
+  return (
+    <div className={`min-h-screen bg-slate-50 text-slate-900 ${centre ? 'flex items-center justify-center p-6' : ''}`}>
+      {children}
+    </div>
+  )
+}
 
 export default function VotingPage() {
-  const { roundId, teamId } = useParams()
+  const { teamId: teamIdParam, roundKey: roundKeyParam } = useParams()
+  const teamId = teamIdParam ? decodeURIComponent(teamIdParam) : ''
+  const roundKey = roundKeyParam ? decodeURIComponent(roundKeyParam) : ''
+
+  const [resolvedRoundId, setResolvedRoundId] = useState(null)
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -18,15 +49,47 @@ export default function VotingPage() {
   const [submitError, setSubmitError] = useState(null)
 
   useEffect(() => {
-    getVoteSession(roundId, teamId)
-      .then(s => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    setSession(null)
+    setResolvedRoundId(null)
+    setSubmitted(false)
+    setVotes({ '3': null, '2': null, '1': null })
+
+    ;(async () => {
+      try {
+        const rounds = await getRounds()
+        if (cancelled) return
+
+        if (!isValidVoteTeamId(teamId)) {
+          setError('Invalid voting link.')
+          return
+        }
+
+        const rid = resolveRoundIdFromKey(roundKey, rounds)
+        if (!rid) {
+          setError('Voting session not found. Check the link or ask your team manager.')
+          return
+        }
+
+        setResolvedRoundId(rid)
+
+        const s = await getVoteSession(rid, teamId)
+        if (cancelled) return
+
         if (!s) setError('Voting session not found. Check the link or ask your team manager.')
         else if (!s.isOpen) setError('Voting for this round has closed.')
         else setSession(s)
-      })
-      .catch(() => setError('Failed to load voting session.'))
-      .finally(() => setLoading(false))
-  }, [roundId, teamId])
+      } catch {
+        if (!cancelled) setError('Failed to load voting session.')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [teamId, roundKey])
 
   const clearVote = (points) => {
     setVotes(prev => ({ ...prev, [String(points)]: null }))
@@ -48,178 +111,254 @@ export default function VotingPage() {
   const ready = votes['3'] !== null && votes['2'] !== null && votes['1'] !== null
 
   const handleSubmit = async () => {
-    if (!ready || submitting) return
+    if (!ready || submitting || !resolvedRoundId) return
     setSubmitting(true)
     setSubmitError(null)
     try {
-      await submitVote(`${roundId}__${teamId}`, { votes })
+      await submitVote(voteSessionId(resolvedRoundId, teamId), { votes })
       setSubmitted(true)
-    } catch (e) {
+    } catch {
       setSubmitError('Something went wrong. Please try again.')
     } finally {
       setSubmitting(false)
     }
   }
 
-  // ── Loading ──────────────────────────────────────────────────────────────
-  if (loading) return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center">
-      <div className="text-slate-400 text-sm">Loading…</div>
-    </div>
-  )
+  if (loading) {
+    return (
+      <Layout centre>
+        <p className="text-sm text-slate-500">Loading…</p>
+      </Layout>
+    )
+  }
 
-  // ── Error ────────────────────────────────────────────────────────────────
-  if (error) return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
-      <div className="text-center space-y-3">
-        <div className="text-4xl">🏑</div>
-        <p className="text-slate-300 text-sm max-w-xs">{error}</p>
-      </div>
-    </div>
-  )
-
-  // ── Submitted ────────────────────────────────────────────────────────────
-  if (submitted) return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
-      <div className="text-center space-y-4">
-        <div className="text-5xl">✅</div>
-        <h2 className="text-white text-xl font-bold">Vote submitted!</h2>
-        <p className="text-slate-400 text-sm">Your votes have been recorded anonymously.</p>
-        <div className="mt-4 space-y-1.5 text-sm">
-          {[['3', '🥇'], ['2', '🥈'], ['1', '🥉']].map(([pts, medal]) => {
-            const p = session.players.find(pl => String(pl.id) === String(votes[pts]))
-            return p ? (
-              <div key={pts} className="text-slate-300">{medal} {pts} pts — {p.name}</div>
-            ) : null
-          })}
+  if (error) {
+    return (
+      <Layout centre>
+        <div className="max-w-sm rounded-2xl border border-slate-200 bg-white px-6 py-8 text-center shadow-sm">
+          <h2 className="text-base font-semibold text-slate-900">Voting unavailable</h2>
+          <p className="mt-2 text-sm text-slate-500">{error}</p>
         </div>
-      </div>
-    </div>
-  )
+      </Layout>
+    )
+  }
 
+  const match = session.matchContext || {}
+  const players = Array.isArray(session.players) ? session.players : []
+  const scoreReady = match.scoreFor != null && match.scoreAgainst != null
+  const resultDetail = [
+    match.result,
+    scoreReady ? `${match.scoreFor}-${match.scoreAgainst}` : '',
+  ].filter(Boolean).join(' ')
+  const matchDetails = [
+    formatDate(match.matchDate),
+    match.time,
+    match.venue,
+    resultDetail,
+  ].filter(Boolean)
+  const scorers = Array.isArray(match.scorers)
+    ? match.scorers.filter(scorer => scorer?.name && Number(scorer.goals) > 0)
+    : []
+  const scorerSummary = scorers
+    .map(scorer => `${scorer.name}${Number(scorer.goals) > 1 ? ` x${Number(scorer.goals)}` : ''}`)
+    .join(', ')
   const assignedIds = new Set(Object.values(votes).filter(Boolean).map(String))
 
-  // ── Voting UI ────────────────────────────────────────────────────────────
-  return (
-    <div className="min-h-screen bg-slate-900 text-white">
+  const slotMeta = MEDAL
 
-      {/* ── Header ── */}
-      <div className="bg-slate-800 border-b border-slate-700 px-5 py-5">
-        <div className="flex items-baseline gap-3 mb-1">
-          <span className="text-3xl font-extrabold tracking-tight text-white">{session.teamId}</span>
-          <span className="text-xl font-semibold text-blue-400">{session.roundLabel}</span>
-        </div>
-        <p className="text-sm text-slate-400 font-medium">Best &amp; Fairest — assign 3, 2 and 1 points</p>
-        <p className="text-xs text-slate-600 mt-0.5">Anonymous · votes close automatically</p>
-      </div>
-
-      {/* ── Vote slot summary ── */}
-      <div className="px-4 py-3 border-b border-slate-700 flex gap-2">
-        {[
-          ['3', '🥇', 'border-yellow-500/60 bg-yellow-500/10', 'text-yellow-400'],
-          ['2', '🥈', 'border-slate-400/40 bg-slate-400/10', 'text-slate-300'],
-          ['1', '🥉', 'border-amber-700/40 bg-amber-800/10', 'text-amber-500'],
-        ].map(([pts, medal, border, colour]) => {
-          const player = session.players.find(p => String(p.id) === String(votes[pts]))
-          return (
-            <div key={pts}
-              className={`flex-1 flex flex-col items-center gap-1 px-2 py-2.5 rounded-lg border ${
-                player ? border : 'border-slate-700 bg-slate-800/40'
-              }`}
-            >
-              <span className="text-xl leading-none">{medal}</span>
-              <span className={`text-sm font-bold ${player ? colour : 'text-slate-600'}`}>{pts} pts</span>
-              {player ? (
-                <div className="text-center">
-                  <div className="text-xs text-white font-medium leading-tight">{player.name.split(' ')[0]}</div>
-                  <button onClick={() => clearVote(pts)} className="text-[10px] text-slate-500 hover:text-red-400 mt-0.5">clear</button>
+  if (submitted) {
+    return (
+      <Layout centre>
+        <div className="max-w-sm space-y-5 rounded-2xl border border-slate-200 bg-white px-6 py-8 text-center shadow-sm">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-600 text-lg font-bold text-white">
+            OK
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Vote submitted</h2>
+            <p className="mt-2 text-sm text-slate-500">
+              Your Best & Fairest votes have been recorded anonymously.
+            </p>
+          </div>
+          <div className="space-y-2 text-left">
+            {['3', '2', '1'].map((pts) => {
+              const p = players.find(pl => String(pl.id) === String(votes[pts]))
+              const meta = slotMeta[pts]
+              return p ? (
+                <div
+                  key={pts}
+                  className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+                >
+                  <span className="text-slate-800">{p.name}</span>
+                  <span className="font-semibold" style={{ color: meta.tone }}>{meta.label}</span>
                 </div>
-              ) : (
-                <span className="text-xs text-slate-600">—</span>
-              )}
+              ) : null
+            })}
+          </div>
+        </div>
+      </Layout>
+    )
+  }
+
+  return (
+    <Layout>
+      <div className="mx-auto min-h-screen w-full max-w-lg px-3 pb-36 pt-4 sm:px-4 sm:pt-6">
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 sm:px-5">
+            <div>
+              <div className="text-sm font-semibold text-slate-900">Best & Fairest</div>
+              <div className="text-xs text-slate-500">Mentone 2026</div>
             </div>
-          )
-        })}
-      </div>
+            <span className="rounded-md border border-blue-100 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">
+              Anonymous
+            </span>
+          </div>
 
-      {/* ── Player list ── */}
-      <div className="px-4 py-3 space-y-2 pb-32">
-        <p className="text-xs text-slate-500 mb-3">
-          Tap a player to assign your next available points. Tap again to remove.
-        </p>
+          <div className="border-b border-slate-100 px-4 py-4 sm:px-5">
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span className="text-xs font-semibold text-blue-700">
+                {match.roundLabel || session.roundLabel}
+              </span>
+              <span className="text-xs text-slate-400">·</span>
+              <span className="text-xs font-medium text-slate-500">
+                {match.teamName || session.teamId || teamId}
+              </span>
+            </div>
+            <h1 className="mt-2 text-xl font-semibold leading-tight text-slate-900">
+              {match.opponent ? <>vs {match.opponent}</> : <>Vote for {session.teamId || teamId}</>}
+            </h1>
+            <div className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[13px] text-slate-500">
+              {matchDetails.length > 0 ? matchDetails.map((detail, index) => (
+                <span key={`${detail}-${index}`} className="flex items-center gap-1.5">
+                  {index > 0 && <span className="text-slate-300">·</span>}
+                  <span className={detail === resultDetail ? 'font-semibold text-slate-800' : ''}>{detail}</span>
+                </span>
+              )) : <span>Assign 3, 2 and 1 points</span>}
+            </div>
+            {scorerSummary && (
+              <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-[13px] text-slate-600">
+                <span className="font-semibold text-slate-800">Scorers:</span> {scorerSummary}
+              </div>
+            )}
+          </div>
 
-        {session.players.map(player => {
-          const pid = String(player.id)
-          const assignedPts = Object.entries(votes).find(([, v]) => String(v) === pid)?.[0]
-          const isAssigned = !!assignedPts
-          const nextPts = ['3', '2', '1'].find(p => votes[p] === null)
-          const allFull = assignedIds.size >= 3 && !isAssigned
+          <div className="px-4 py-4 sm:px-5">
+            <p className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Select your 3, 2 and 1
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {['3', '2', '1'].map(pts => {
+                const player = players.find(p => String(p.id) === String(votes[pts]))
+                const meta = slotMeta[pts]
+                return (
+                  <button
+                    key={pts}
+                    type="button"
+                    onClick={() => player && clearVote(pts)}
+                    className={`relative flex min-h-[78px] flex-col justify-between rounded-lg border p-2.5 text-left transition ${
+                      player
+                        ? 'border-transparent shadow-sm'
+                        : 'border-slate-200 bg-slate-50 text-slate-400'
+                    }`}
+                    style={player ? { background: meta.tone, color: meta.fg, borderColor: meta.tone } : undefined}
+                  >
+                    <div className="text-base font-bold leading-none">{meta.label}</div>
+                    <div>
+                      {player ? (
+                        <>
+                          <div className="text-xs font-semibold leading-tight">{player.name.split(' ')[0]}</div>
+                          <div className="mt-0.5 text-[11px] opacity-80">{player.name.split(' ').slice(1).join(' ')}</div>
+                        </>
+                      ) : (
+                        <div className="text-[11px]">{meta.eyebrow}</div>
+                      )}
+                    </div>
+                    {player && (
+                      <div className="absolute right-2 top-1.5 text-[10px] font-semibold opacity-70">tap to clear</div>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
 
-          return (
+          <div className="px-4 pb-2 text-xs leading-relaxed text-slate-500 sm:px-5">
+            Tap a player to assign your next vote.
+            {ready && <span className="font-medium text-blue-700"> All set. Submit below.</span>}
+          </div>
+
+          <div className="px-2 pb-4 sm:px-3">
+            {players.length === 0 && (
+              <div className="mx-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-center text-sm text-slate-500">
+                No players are attached to this voting link yet. Regenerate the link from the planner to refresh the team list.
+              </div>
+            )}
+            {players.map(player => {
+              const pid = String(player.id)
+              const assignedPts = Object.entries(votes).find(([, v]) => String(v) === pid)?.[0]
+              const isAssigned = !!assignedPts
+              const nextPts = ['3', '2', '1'].find(p => votes[p] === null)
+              const allFull = assignedIds.size >= 3 && !isAssigned
+              const meta = isAssigned ? slotMeta[assignedPts] : null
+
+              return (
+                <button
+                  key={pid}
+                  type="button"
+                  onClick={() => {
+                    if (isAssigned) clearVote(assignedPts)
+                    else if (nextPts) assignVote(nextPts, pid)
+                  }}
+                  disabled={allFull}
+                  className={`mb-1 flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition sm:py-3 ${
+                    isAssigned ? 'border-slate-200' : 'border-transparent hover:bg-slate-50'
+                  } ${allFull ? 'cursor-not-allowed opacity-45' : 'cursor-pointer'}`}
+                  style={isAssigned ? {
+                    background:
+                      assignedPts === '3' ? 'rgba(241,180,52,0.12)' :
+                      assignedPts === '2' ? 'rgba(148,163,184,0.15)' :
+                      'rgba(205,127,50,0.12)',
+                    borderColor: meta.tone,
+                  } : undefined}
+                >
+                  <div
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold"
+                    style={isAssigned ? { background: meta.tone, color: meta.fg } : { background: '#f1f5f9', color: '#64748b', border: '1px solid #e2e8f0' }}
+                  >
+                    {isAssigned ? assignedPts : player.name.charAt(0)}
+                  </div>
+                  <span className="flex-1 text-[15px] font-medium text-slate-800">{player.name}</span>
+                  {isAssigned && (
+                    <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: meta.tone }}>
+                      {meta.label}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <div
+          className="fixed bottom-0 left-0 right-0 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur-sm"
+          style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
+        >
+          <div className="mx-auto max-w-lg">
+            {submitError && <p className="mb-2 text-center text-xs text-red-600">{submitError}</p>}
             <button
-              key={pid}
-              onClick={() => {
-                if (isAssigned) clearVote(assignedPts)
-                else if (nextPts) assignVote(nextPts, pid)
-              }}
-              disabled={allFull}
-              className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-left transition-all ${
-                isAssigned
-                  ? assignedPts === '3'
-                    ? 'bg-yellow-500/20 border border-yellow-500/50'
-                    : assignedPts === '2'
-                    ? 'bg-slate-400/20 border border-slate-400/40'
-                    : 'bg-amber-800/20 border border-amber-700/40'
-                  : allFull
-                  ? 'bg-slate-800/40 border border-slate-700/40 opacity-40 cursor-not-allowed'
-                  : 'bg-slate-800 border border-slate-700 active:bg-slate-700'
+              type="button"
+              onClick={handleSubmit}
+              disabled={!ready || submitting}
+              className={`h-12 w-full rounded-lg text-sm font-semibold transition ${
+                ready && !submitting
+                  ? 'bg-blue-600 text-white shadow-sm hover:bg-blue-700'
+                  : 'cursor-not-allowed bg-slate-100 text-slate-400'
               }`}
             >
-              {/* Avatar / points badge */}
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
-                isAssigned
-                  ? assignedPts === '3' ? 'bg-yellow-500 text-slate-900'
-                  : assignedPts === '2' ? 'bg-slate-300 text-slate-900'
-                  : 'bg-amber-700 text-white'
-                  : 'bg-slate-700 text-slate-400'
-              }`}>
-                {isAssigned ? assignedPts : player.name.charAt(0)}
-              </div>
-
-              <span className="text-sm font-medium flex-1">{player.name}</span>
-
-              {isAssigned && (
-                <span className={`text-xs font-bold ${
-                  assignedPts === '3' ? 'text-yellow-400'
-                  : assignedPts === '2' ? 'text-slate-300'
-                  : 'text-amber-500'
-                }`}>
-                  {assignedPts} pts
-                </span>
-              )}
+              {submitting ? 'Submitting…' : ready ? 'Submit votes' : `Pick ${3 - assignedIds.size} more`}
             </button>
-          )
-        })}
+          </div>
+        </div>
       </div>
-
-      {/* ── Fixed submit footer ── */}
-      <div
-        className="fixed bottom-0 left-0 right-0 bg-slate-900/95 border-t border-slate-700 px-4 py-4 backdrop-blur-sm"
-        style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
-      >
-        {submitError && <p className="text-red-400 text-xs mb-2 text-center">{submitError}</p>}
-        <button
-          onClick={handleSubmit}
-          disabled={!ready || submitting}
-          className={`w-full py-4 rounded-xl font-bold text-base transition-all ${
-            ready && !submitting
-              ? 'bg-blue-600 text-white active:bg-blue-700'
-              : 'bg-slate-700 text-slate-500 cursor-not-allowed'
-          }`}
-        >
-          {submitting ? 'Submitting…' : ready ? 'Submit votes' : `Select ${3 - assignedIds.size} more player${3 - assignedIds.size !== 1 ? 's' : ''}`}
-        </button>
-      </div>
-    </div>
+    </Layout>
   )
 }

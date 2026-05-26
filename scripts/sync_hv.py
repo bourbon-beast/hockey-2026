@@ -7,10 +7,10 @@ a text/email digest.
 
 Run from the project root (Tuesday or Wednesday after weekend games):
     pip install firebase-admin requests beautifulsoup4
-    python sync_hv.py
-    python sync_hv.py --dry-run          # preview without writing
-    python sync_hv.py --format json      # JSON output instead of text
-    python sync_hv.py --comp PL          # single competition only
+    python scripts/sync_hv.py
+    python scripts/sync_hv.py --dry-run          # preview without writing
+    python scripts/sync_hv.py --format json      # JSON output instead of text
+    python scripts/sync_hv.py --comp PL          # single competition only
 """
 
 import re
@@ -18,26 +18,17 @@ import sys
 import json
 import argparse
 from datetime import date, datetime
+from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
 import firebase_admin
 from firebase_admin import credentials, firestore as fs
 
-# ── Configuration ─────────────────────────────────────────────────────────────
-
-SERVICE_ACCOUNT = 'hockey-2026-f521f-firebase-adminsdk-fbsvc-6c421c359a.json'
-
-ENV_CONFIG = {
-    'prod': {
-        'service_account': 'hockey-2026-f521f-firebase-adminsdk-fbsvc-6c421c359a.json',
-        'project_id':      'hockey-2026-f521f',
-    },
-    'uat': {
-        'service_account': 'hockey-2026-uat-firebase-adminsdk.json',  # download from Firebase console
-        'project_id':      'hockey-2026-uat',
-    },
-}
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+from _paths import ENV_CONFIG  # noqa: E402
 
 BASE_URL = 'https://www.hockeyvictoria.org.au'
 HEADERS  = {
@@ -209,21 +200,6 @@ def _hv_name_to_display(name_raw: str) -> str:
             if ',' in raw else raw)
 
 
-def _card_letters(card: dict) -> list[str]:
-    return (['Y'] * card.get('yellow', 0) +
-            ['G'] * card.get('green', 0) +
-            ['R'] * card.get('red', 0))
-
-
-def _format_cards_text(cards: list[dict]) -> str:
-    parts = []
-    for card in cards or []:
-        letters = _card_letters(card)
-        if letters:
-            parts.append(f"{card['name']} ({' '.join(letters)})")
-    return ', '.join(parts)
-
-
 def parse_game_digest_stats(game_url: str) -> dict:
     """Fetch game detail page, return Mentone scorers and card details."""
     try:
@@ -390,7 +366,6 @@ def format_text(summaries: list[dict]) -> str:
             lines.append(f"Goals:  {', '.join(scorers)}")
         else:
             lines.append("Goals:  --")
-        lines.append(f"Cards:  {_format_cards_text(s.get('cards', [])) or '--'}")
 
     lines += [
         "",
@@ -438,12 +413,6 @@ def format_html(summaries: list[dict]) -> str:
                    'font-weight:bold;color:#fff;background:#dc2626;',
         'badge_d': 'display:inline-block;padding:1px 7px;border-radius:3px;font-size:12px;'
                    'font-weight:bold;color:#fff;background:#ca8a04;',
-        'card_g':  'display:inline-block;padding:0 5px;border-radius:3px;font-size:11px;'
-                   'font-weight:bold;color:#fff;background:#16a34a;',
-        'card_y':  'display:inline-block;padding:0 5px;border-radius:3px;font-size:11px;'
-                   'font-weight:bold;color:#fff;background:#ca8a04;',
-        'card_r':  'display:inline-block;padding:0 5px;border-radius:3px;font-size:11px;'
-                   'font-weight:bold;color:#fff;background:#dc2626;',
     }
 
     def badge(result):
@@ -453,18 +422,6 @@ def format_html(summaries: list[dict]) -> str:
     def row(label, value):
         return (f'<tr><td style="{S["label"]}width:70px;padding:1px 8px 1px 0;">{label}</td>'
                 f'<td style="padding:1px 0;">{value}</td></tr>')
-
-    def cards_html(cards):
-        parts = []
-        for card in cards or []:
-            badges = ''
-            badges += (f'<span style="{S["card_y"]}">Y</span> ' * card.get('yellow', 0))
-            badges += (f'<span style="{S["card_g"]}">G</span> ' * card.get('green', 0))
-            badges += (f'<span style="{S["card_r"]}">R</span> ' * card.get('red', 0))
-            badges = badges.strip()
-            if badges:
-                parts.append(f'{card["name"]} {badges}')
-        return ', '.join(parts)
 
     parts = [f'<div style="{S["wrap"]}">',
              f'<p style="{S["h1"]}">Mentone Hockey Club — Weekly Update</p>',
@@ -494,7 +451,6 @@ def format_html(summaries: list[dict]) -> str:
         result = r['result'] or 'Not entered'
         scorers = s.get('scorers', [])
         goals_val = ', '.join(scorers) if scorers else '–'
-        cards_val = cards_html(s.get('cards', [])) or '–'
 
         opp      = r['opponent']
         round_n  = r['round']
@@ -506,7 +462,6 @@ def format_html(summaries: list[dict]) -> str:
             f'{row("Result:", f"{result} ({ha}) against {opp}")}'
             f'{row("Score:", score)}'
             f'{row("Goals:", goals_val)}'
-            f'{row("Cards:", cards_val)}'
             f'</table></div>'
         )
 

@@ -6,9 +6,9 @@ and writes results to Firestore at hvSync/ladders.
 Run separately from sync_hv.py — this won't touch results or fixture data.
 
     pip install firebase-admin requests beautifulsoup4
-    python sync_ladder.py              # write to UAT (default)
-    python sync_ladder.py --env prod   # write to PROD
-    python sync_ladder.py --dry-run    # print without writing
+    python scripts/sync_ladder.py              # write to UAT (default)
+    python scripts/sync_ladder.py --env prod   # write to PROD
+    python scripts/sync_ladder.py --dry-run    # print without writing
 """
 
 import re
@@ -16,24 +16,17 @@ import sys
 import json
 import argparse
 from datetime import datetime
+from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
 import firebase_admin
 from firebase_admin import credentials, firestore as fs
 
-# ── Configuration ─────────────────────────────────────────────────────────────
-
-ENV_CONFIG = {
-    'prod': {
-        'service_account': 'hockey-2026-f521f-firebase-adminsdk-fbsvc-6c421c359a.json',
-        'project_id':      'hockey-2026-f521f',
-    },
-    'uat': {
-        'service_account': 'hockey-2026-uat-firebase-adminsdk.json',
-        'project_id':      'hockey-2026-uat',
-    },
-}
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+from _paths import ENV_CONFIG  # noqa: E402
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '

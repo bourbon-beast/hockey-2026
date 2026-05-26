@@ -3,6 +3,7 @@ import { getTeamPlayers, getRounds, getRoundMatches, getHvSync } from '../db'
 import { HV_LINKS } from './hvLinks'
 import HvAliasPanel from './HvAliasPanel'
 import { getVoteSession, getVoteResponses, tallyVotes } from '../db.votes'
+import PageHeader from './PageHeader'
 
 async function fetchTeamRecord(teamId) {
   const rounds = await getRounds()
@@ -33,12 +34,45 @@ function posColour(pos) {
   return '#64748b'
 }
 
+/** Same weights as AllPlayers / digest `_build_leaders` */
+function cardPoints(s26) {
+  if (!s26) return 0
+  return (
+    (s26.greenCards || 0) * 1 +
+    (s26.yellowCards || 0) * 2 +
+    (s26.redCards || 0) * 3
+  )
+}
+
+function compareSquadPlayer(a, b, teamId, col) {
+  if (col === 'name') return a.name.localeCompare(b.name)
+  if (col === 'gp') {
+    return (b.games_played_2026?.[teamId] || 0) - (a.games_played_2026?.[teamId] || 0)
+  }
+  if (col === 'goals') {
+    return (b.stats_2026?.goals || 0) - (a.stats_2026?.goals || 0)
+  }
+  if (col === 'cardPts') {
+    return cardPoints(b.stats_2026) - cardPoints(a.stats_2026)
+  }
+  return 0
+}
+
+function sortSquadPlayers(list, teamId, col, dir) {
+  return [...list].sort((a, b) => {
+    const cmp = compareSquadPlayer(a, b, teamId, col)
+    return dir === 'asc' ? cmp : -cmp
+  })
+}
+
 export default function TeamView({ teams, statuses, selectedTeam, onSelectTeam, onSelectPlayer, refreshKey, isAdmin }) {
   const [teamData, setTeamData]      = useState(null)
   const [record, setRecord]          = useState(null)
   const [ladderPositions, setLadder] = useState({})
   const [loading, setLoading]        = useState(true)
   const [activeTab, setActiveTab]    = useState('squad') // 'squad' | 'votes'
+  const [playedSort, setPlayedSort]   = useState({ col: 'name', dir: 'asc' })
+  const [assignedSort, setAssignedSort] = useState({ col: 'name', dir: 'asc' })
 
   // Votes state
   const [votesRoundList, setVotesRoundList]   = useState([])
@@ -103,8 +137,37 @@ export default function TeamView({ teams, statuses, selectedTeam, onSelectTeam, 
     setVotesRound(null)
   }, [selectedTeam])
 
+  useEffect(() => {
+    setPlayedSort({ col: 'name', dir: 'asc' })
+    setAssignedSort({ col: 'name', dir: 'asc' })
+  }, [selectedTeam])
+
+  const togglePlayedSort = (col) => {
+    setPlayedSort(prev =>
+      prev.col === col
+        ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { col, dir: 'asc' },
+    )
+  }
+
+  const toggleAssignedSort = (col) => {
+    setAssignedSort(prev =>
+      prev.col === col
+        ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { col, dir: 'asc' },
+    )
+  }
+
+  const squadSortHeaderCls =
+    'px-4 py-3 text-sm font-semibold text-slate-700 cursor-pointer hover:bg-slate-100 select-none'
+
   return (
     <div className="space-y-4">
+      <PageHeader
+        title="Teams"
+        description="Ladder positions, rosters, and per-team voting summaries"
+      />
+
       {/* ── Ladder position strip ─────────────────────────────────── */}
       <div className="grid grid-cols-6 gap-2">
         {teams.filter(t => t.id !== 'NEW').map(t => {
@@ -145,9 +208,9 @@ export default function TeamView({ teams, statuses, selectedTeam, onSelectTeam, 
       </div>
 
       {/* ── Team header card ─────────────────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
         <div style={{ background: '#eab308', height: '3px' }} />
-        <div className="px-5 py-4" style={{ background: '#1e3a8a' }}>
+        <div className="px-5 py-4" style={{ background: 'linear-gradient(135deg, #2747a8 0%, #1e3a8a 100%)' }}>
           <h2 className="text-xl font-bold text-white tracking-wide">Mentone {team?.name}</h2>
           <p className="text-blue-200 text-xs mt-0.5">2026 Season</p>
         </div>
@@ -171,7 +234,7 @@ export default function TeamView({ teams, statuses, selectedTeam, onSelectTeam, 
         )}
 
         {/* W/D/L record row */}
-        <div className="grid grid-cols-5 divide-x divide-slate-100 text-center">
+        <div className="grid grid-cols-5 divide-x divide-slate-100 text-center bg-white">
           {[
             { label: 'Played', val: record?.played ?? '—', color: 'text-slate-700' },
             { label: 'Won',    val: record?.W     ?? '—', color: 'text-green-600'  },
@@ -203,7 +266,7 @@ export default function TeamView({ teams, statuses, selectedTeam, onSelectTeam, 
                   ? 'border-indigo-600 text-indigo-600'
                   : 'border-transparent text-slate-400 hover:text-slate-600'
               }`}>
-              🗳 Votes
+              Votes
             </button>
           )}
         </div>
@@ -211,7 +274,7 @@ export default function TeamView({ teams, statuses, selectedTeam, onSelectTeam, 
 
       {/* ── Squad tab ──────────────────────────────────────────────── */}
       {activeTab === 'squad' && (
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
           {loading ? (
             <div className="text-slate-400 py-12 text-center text-sm">Loading…</div>
           ) : teamData?.squad2026.length === 0 ? (
@@ -223,27 +286,83 @@ export default function TeamView({ teams, statuses, selectedTeam, onSelectTeam, 
                 <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Played this season</span>
                 <span className="text-xs text-slate-400">{teamData.playedForTeam.length}</span>
               </div>
-              {teamData.playedForTeam.map((player, idx) => {
-                const gp       = player.games_played_2026?.[selectedTeam] || 0
-                const s26      = player.stats_2026
-                const hasCards = s26 && (s26.greenCards > 0 || s26.yellowCards > 0 || s26.redCards > 0)
-                const isLast   = idx === teamData.playedForTeam.length - 1 && !teamData.assignedNotYetPlayed?.length
-                return (
-                  <div key={player.id} onClick={() => onSelectPlayer && onSelectPlayer(player)}
-                    className={`flex items-center gap-2 px-4 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors ${!isLast ? 'border-b border-slate-100' : ''}`}>
-                    <span className="text-sm text-slate-800 flex-1">{player.name}</span>
-                    {hasCards && (
-                      <span className="flex items-center gap-0.5 flex-shrink-0">
-                        {s26.greenCards  > 0 && <span className="inline-flex items-center justify-center w-4 h-4 rounded text-white text-xs font-bold" style={{background:'#16a34a',fontSize:'10px'}}>{s26.greenCards}</span>}
-                        {s26.yellowCards > 0 && <span className="inline-flex items-center justify-center w-4 h-4 rounded text-white text-xs font-bold" style={{background:'#ca8a04',fontSize:'10px'}}>{s26.yellowCards}</span>}
-                        {s26.redCards    > 0 && <span className="inline-flex items-center justify-center w-4 h-4 rounded text-white text-xs font-bold" style={{background:'#dc2626',fontSize:'10px'}}>{s26.redCards}</span>}
-                      </span>
-                    )}
-                    {s26?.goals > 0 && <span className="text-xs text-blue-600 font-semibold flex-shrink-0">{s26.goals}g</span>}
-                    <span className="text-xs flex-shrink-0 tabular-nums font-medium w-8 text-right text-slate-500">{gp}gp</span>
-                  </div>
-                )
-              })}
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[520px]">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      <th
+                        onClick={() => togglePlayedSort('name')}
+                        className={`${squadSortHeaderCls} text-left`}
+                      >
+                        Name
+                        {playedSort.col === 'name' && (
+                          <span className="ml-1">{playedSort.dir === 'asc' ? '↑' : '↓'}</span>
+                        )}
+                      </th>
+                      <th
+                        onClick={() => togglePlayedSort('gp')}
+                        className={`${squadSortHeaderCls} text-right w-[4.5rem] tabular-nums`}
+                      >
+                        GP
+                        {playedSort.col === 'gp' && (
+                          <span className="ml-1">{playedSort.dir === 'asc' ? '↑' : '↓'}</span>
+                        )}
+                      </th>
+                      <th
+                        onClick={() => togglePlayedSort('goals')}
+                        className={`${squadSortHeaderCls} text-right w-[4.5rem] tabular-nums`}
+                      >
+                        Goals
+                        {playedSort.col === 'goals' && (
+                          <span className="ml-1">{playedSort.dir === 'asc' ? '↑' : '↓'}</span>
+                        )}
+                      </th>
+                      <th
+                        onClick={() => togglePlayedSort('cardPts')}
+                        className={`${squadSortHeaderCls} text-left`}
+                      >
+                        Cards
+                        {playedSort.col === 'cardPts' && (
+                          <span className="ml-1">{playedSort.dir === 'asc' ? '↑' : '↓'}</span>
+                        )}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {sortSquadPlayers(teamData.playedForTeam, selectedTeam, playedSort.col, playedSort.dir).map((player) => {
+                      const gp  = player.games_played_2026?.[selectedTeam] || 0
+                      const s26 = player.stats_2026
+                      const hasCards = s26 && (s26.greenCards > 0 || s26.yellowCards > 0 || s26.redCards > 0)
+                      return (
+                        <tr
+                          key={player.id}
+                          onClick={() => onSelectPlayer && onSelectPlayer(player)}
+                          className="cursor-pointer transition-colors hover:bg-slate-50"
+                        >
+                          <td className="px-4 py-3 text-sm font-medium text-slate-800">{player.name}</td>
+                          <td className="px-4 py-3 text-sm tabular-nums text-slate-700 text-right font-medium">
+                            {gp > 0 ? gp : <span className="text-slate-300">—</span>}
+                          </td>
+                          <td className="px-4 py-3 text-sm tabular-nums text-slate-700 text-right">
+                            {s26?.goals > 0 ? s26.goals : <span className="text-slate-300">—</span>}
+                          </td>
+                          <td className="px-4 py-3">
+                            {hasCards ? (
+                              <span className="flex items-center gap-1 justify-start">
+                                {s26.greenCards  > 0 && <span className="inline-flex items-center justify-center w-5 h-5 rounded text-white text-xs font-bold" style={{ background: '#16a34a' }}>{s26.greenCards}</span>}
+                                {s26.yellowCards > 0 && <span className="inline-flex items-center justify-center w-5 h-5 rounded text-white text-xs font-bold" style={{ background: '#ca8a04' }}>{s26.yellowCards}</span>}
+                                {s26.redCards    > 0 && <span className="inline-flex items-center justify-center w-5 h-5 rounded text-white text-xs font-bold" style={{ background: '#dc2626' }}>{s26.redCards}</span>}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </>)}
             {/* Assigned but not yet played */}
             {teamData.assignedNotYetPlayed?.length > 0 && (<>
@@ -251,13 +370,64 @@ export default function TeamView({ teams, statuses, selectedTeam, onSelectTeam, 
                 <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Assigned — not yet played</span>
                 <span className="text-xs text-slate-400">{teamData.assignedNotYetPlayed.length}</span>
               </div>
-              {teamData.assignedNotYetPlayed.map((player, idx) => (
-                <div key={player.id} onClick={() => onSelectPlayer && onSelectPlayer(player)}
-                  className={`flex items-center gap-2 px-4 py-2.5 cursor-pointer hover:bg-slate-50 transition-colors ${idx !== teamData.assignedNotYetPlayed.length - 1 ? 'border-b border-slate-100' : ''}`}>
-                  <span className="text-sm text-slate-500 flex-1">{player.name}</span>
-                  <span className="text-xs text-slate-300 flex-shrink-0">—</span>
-                </div>
-              ))}
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[520px]">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      <th
+                        onClick={() => toggleAssignedSort('name')}
+                        className={`${squadSortHeaderCls} text-left`}
+                      >
+                        Name
+                        {assignedSort.col === 'name' && (
+                          <span className="ml-1">{assignedSort.dir === 'asc' ? '↑' : '↓'}</span>
+                        )}
+                      </th>
+                      <th
+                        onClick={() => toggleAssignedSort('gp')}
+                        className={`${squadSortHeaderCls} text-right w-[4.5rem] tabular-nums`}
+                      >
+                        GP
+                        {assignedSort.col === 'gp' && (
+                          <span className="ml-1">{assignedSort.dir === 'asc' ? '↑' : '↓'}</span>
+                        )}
+                      </th>
+                      <th
+                        onClick={() => toggleAssignedSort('goals')}
+                        className={`${squadSortHeaderCls} text-right w-[4.5rem] tabular-nums`}
+                      >
+                        Goals
+                        {assignedSort.col === 'goals' && (
+                          <span className="ml-1">{assignedSort.dir === 'asc' ? '↑' : '↓'}</span>
+                        )}
+                      </th>
+                      <th
+                        onClick={() => toggleAssignedSort('cardPts')}
+                        className={`${squadSortHeaderCls} text-left`}
+                      >
+                        Cards
+                        {assignedSort.col === 'cardPts' && (
+                          <span className="ml-1">{assignedSort.dir === 'asc' ? '↑' : '↓'}</span>
+                        )}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {sortSquadPlayers(teamData.assignedNotYetPlayed, selectedTeam, assignedSort.col, assignedSort.dir).map((player) => (
+                      <tr
+                        key={player.id}
+                        onClick={() => onSelectPlayer && onSelectPlayer(player)}
+                        className="cursor-pointer transition-colors hover:bg-slate-50"
+                      >
+                        <td className="px-4 py-3 text-sm font-medium text-slate-500">{player.name}</td>
+                        <td className="px-4 py-3 text-sm text-right text-slate-300">—</td>
+                        <td className="px-4 py-3 text-sm text-right text-slate-300">—</td>
+                        <td className="px-4 py-3 text-sm text-slate-300">—</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </>)}
           </>)}
         </div>
