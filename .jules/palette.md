@@ -1,0 +1,3 @@
+## 2024-05-26 - Accessible Icon Buttons in TeamColumn
+**Learning:** Found an accessibility issue pattern in the app's components where icon-only SVG buttons in `src/components/TeamColumn.jsx` lack proper `aria-label`, `title`, and inner `aria-hidden="true"` attributes for screen readers.
+**Action:** Applied `aria-label` and `title` to the parent `<button>` elements, and added `aria-hidden="true"` to the inner `<svg>` elements to prevent screen readers from announcing redundant or confusing information. This reusable UX pattern should be checked for when building future icon-only buttons across the design system.
