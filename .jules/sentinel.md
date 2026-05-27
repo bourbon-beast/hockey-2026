@@ -1,0 +1,4 @@
+## 2025-05-27 - DOMPurify usage for React dangerouslySetInnerHTML
+**Vulnerability:** A cross-site scripting (XSS) vulnerability was found in `src/components/FixtureView.jsx` because unsanitized HTML data (`selected.html` fetched from Firebase Firestore) was rendered using `dangerouslySetInnerHTML`.
+**Learning:** Even internal admin tools tracking digests with `dangerouslySetInnerHTML` need proper sanitization since HTML may include unchecked or potentially malicious data fetched remotely.
+**Prevention:** Always use a reputable library like `dompurify` to sanitize inputs provided to `dangerouslySetInnerHTML`.
