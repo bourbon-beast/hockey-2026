@@ -632,13 +632,6 @@ export default function PublicUnavailabilityForm() {
                 >
                   Close & Keep Editing
                 </button>
-                <button
-                  type="button"
-                  onClick={clearForm}
-                  className="flex-1 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition"
-                >
-                  Submit for Someone Else
-                </button>
               </div>
             </div>
           </div>
