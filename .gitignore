@@ -40,3 +40,8 @@ npm-debug.log*
 .env.uat
 hockey-2026-uat-firebase-adminsdk.json
 *.xlsx
+
+# Cache and debug
+.npm-debug-cache/
+.claude/
+debug_hv.html
