@@ -1,0 +1,4 @@
+## 2024-05-31 - Cross-Site Scripting (XSS) in Digest HTML View
+**Vulnerability:** The application was directly rendering unsanitized user-generated HTML from Firestore into the DOM using React's `dangerouslySetInnerHTML` in `src/components/FixtureView.jsx`.
+**Learning:** This existed because the feature relies on storing pre-rendered HTML snippets (digests) in the database and then displaying them. Since Firestore rules might allow authorized users or admins to write this data, any malicious HTML could be executed in the context of other users viewing the digest. Even if input comes from a trusted source, defense-in-depth requires sanitization before rendering raw HTML to the DOM to prevent stored XSS.
+**Prevention:** To avoid this next time, always use an HTML sanitizer like DOMPurify when rendering rich text or HTML content via `dangerouslySetInnerHTML`, regardless of the data source's perceived trustworthiness.
