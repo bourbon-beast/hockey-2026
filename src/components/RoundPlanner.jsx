@@ -818,7 +818,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
               <div className="bg-white rounded-t-xl sm:rounded-xl shadow-2xl w-full sm:max-w-md max-h-[80vh] flex flex-col">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
                   <h3 className="font-semibold text-slate-800">Add player — {pickerOpen.teamId}</h3>
-                  <button onClick={() => setPickerOpen(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+                  <button onClick={() => setPickerOpen(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none" aria-label="Close" title="Close">×</button>
                 </div>
                 <div className="px-4 py-2 border-b border-slate-100">
                   <input ref={searchRef} value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} placeholder="Search players…" className="w-full text-sm border border-slate-200 rounded px-3 py-2" />
