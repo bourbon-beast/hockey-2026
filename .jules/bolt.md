@@ -1,0 +1,3 @@
+## 2024-06-04 - Array Filtering Anti-Pattern in React
+**Learning:** Found a common anti-pattern where a large array of players was being filtered and sorted on every single render without memoization in `AllPlayers.jsx`. This becomes increasingly expensive as the player database grows, especially since string `toLowerCase()` conversions were happening inside the `.filter()` loop.
+**Action:** Wrapped the expensive derived state computation in `useMemo` and hoisted the `search.toLowerCase()` string conversion outside of the `.filter()` loop to be executed only once per render rather than once per player.
