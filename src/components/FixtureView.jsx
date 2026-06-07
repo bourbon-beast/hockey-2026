@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Clock, MapPin, ChevronDown, Copy, Check, Images } from 'lucide-react'
+import DOMPurify from 'dompurify'
 import { exportDigestImageTriptych } from '../utils/digestExportImages'
 import { getRounds, getRoundMatches, getDigestHistory } from '../db'
 import PageHeader from './PageHeader'
@@ -465,7 +466,8 @@ function DigestPanel() {
         <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
           {selected.html
             ? <div className="p-4 text-sm leading-relaxed"
-                   dangerouslySetInnerHTML={{ __html: selected.html }} />
+                   // 🛡️ Sentinel: Sanitize HTML content retrieved from Firestore before rendering to prevent XSS attacks
+                   dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.html) }} />
             : <pre className="p-4 text-sm text-slate-700 whitespace-pre-wrap font-sans leading-relaxed">
                 {selected.text}
               </pre>
