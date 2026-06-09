@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { getPlayers, createPlayer } from '../db'
 import PageHeader from './PageHeader'
 
@@ -150,22 +150,26 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
 
   useEffect(() => { loadPlayers() }, [refreshKey, showInactive])
 
-  const filtered = players
-    .filter(p => {
-      if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false
-      if (statusFilters.size > 0 && !statusFilters.has(p.status_id)) return false
-      return true
-    })
-    .sort((a, b) => {
-      let cmp = 0
-      if (sortBy === 'name')   cmp = a.name.localeCompare(b.name)
-      if (sortBy === 'team')   cmp = (a.assigned_team_id_2026 || '').localeCompare(b.assigned_team_id_2026 || '')
-      if (sortBy === 'games')  cmp = (b.total_games_2026 || 0) - (a.total_games_2026 || 0)
-      if (sortBy === 'goals')  cmp = (b.stats_2026?.goals || 0) - (a.stats_2026?.goals || 0)
-      if (sortBy === 'cardPts') cmp = cardPoints(b.stats_2026) - cardPoints(a.stats_2026)
-      if (sortBy === 'status') cmp = a.status_id.localeCompare(b.status_id)
-      return sortDir === 'asc' ? cmp : -cmp
-    })
+  // ⚡ Bolt: Performance Optimization
+  // Impact: Prevents expensive filtering and sorting of the entire player list on every component re-render
+  const filtered = useMemo(() => {
+    return players
+      .filter(p => {
+        if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false
+        if (statusFilters.size > 0 && !statusFilters.has(p.status_id)) return false
+        return true
+      })
+      .sort((a, b) => {
+        let cmp = 0
+        if (sortBy === 'name')   cmp = a.name.localeCompare(b.name)
+        if (sortBy === 'team')   cmp = (a.assigned_team_id_2026 || '').localeCompare(b.assigned_team_id_2026 || '')
+        if (sortBy === 'games')  cmp = (b.total_games_2026 || 0) - (a.total_games_2026 || 0)
+        if (sortBy === 'goals')  cmp = (b.stats_2026?.goals || 0) - (a.stats_2026?.goals || 0)
+        if (sortBy === 'cardPts') cmp = cardPoints(b.stats_2026) - cardPoints(a.stats_2026)
+        if (sortBy === 'status') cmp = a.status_id.localeCompare(b.status_id)
+        return sortDir === 'asc' ? cmp : -cmp
+      })
+  }, [players, search, statusFilters, sortBy, sortDir])
 
   const toggleSort = (col) => {
     if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
