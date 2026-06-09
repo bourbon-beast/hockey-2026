@@ -212,9 +212,10 @@ function App() {
             <button
               onClick={() => setShowLogoutConfirm(true)}
               title={user.email}
+              aria-label={`User menu for ${user.email}`}
               className={`w-7 h-7 rounded-full text-xs font-semibold text-white flex items-center justify-center ${isAdmin ? 'bg-blue-600' : 'bg-slate-400'}`}
             >
-              {(user.displayName || user.email || '?').charAt(0).toUpperCase()}
+              <span aria-hidden="true">{(user.displayName || user.email || '?').charAt(0).toUpperCase()}</span>
             </button>
           </div>
           <div className="flex items-center gap-2">
@@ -251,9 +252,10 @@ function App() {
         <button
           onClick={() => setShowLogoutConfirm(true)}
           title={user.email}
+          aria-label={`User menu for ${user.email}`}
           className={`h-8 w-8 rounded-full text-xs font-semibold text-white flex items-center justify-center ${isAdmin ? 'bg-blue-600' : 'bg-slate-400'}`}
         >
-          {(user.displayName || user.email || '?').charAt(0).toUpperCase()}
+          <span aria-hidden="true">{(user.displayName || user.email || '?').charAt(0).toUpperCase()}</span>
         </button>
       </nav>
 
