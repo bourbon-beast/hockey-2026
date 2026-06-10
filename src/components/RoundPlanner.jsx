@@ -144,6 +144,14 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
   const getAvailablePlayers = () => {
     const selected = new Set(roundData?.selections.filter(s => s.team_id === pickerOpen?.teamId).map(s => s.player_id))
     const allSelectedInRound = new Set(roundData?.selections.map(s => s.player_id))
+
+    // ⚡ Bolt: Performance Optimization
+    // Impact: Hoists match lookup outside the player filter loop, avoiding O(N*M) lookups during picker render.
+    const teamMatch = roundData?.matches?.find(m => m.team_id === pickerOpen?.teamId)
+    const matchDay = teamMatch?.match_date === currentRound?.sat_date ? 'sat'
+                   : teamMatch?.match_date === currentRound?.sun_date ? 'sun'
+                   : null
+
     return allPlayers
         .filter(p => p.is_active !== 0)                                          // always hide inactive
         .filter(p => p.status_id !== 'not_returning')                            // always hide not returning
@@ -154,10 +162,6 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
           if (showUnavailableInPicker) return true           // user has toggled "show unavailable"
           if (unavail === 'both') return false               // unavailable all weekend — hide
           // Partial unavailability — check if the team's match day conflicts
-          const teamMatch = roundData?.matches?.find(m => m.team_id === pickerOpen?.teamId)
-          const matchDay = teamMatch?.match_date === currentRound?.sat_date ? 'sat'
-                         : teamMatch?.match_date === currentRound?.sun_date ? 'sun'
-                         : null
           if (!matchDay) return false                        // no match date set — safe fallback, hide
           return unavail !== matchDay                        // only show if unavail is the OTHER day
         })
@@ -864,29 +868,33 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
                   </div>
                 </div>
                 <div className="overflow-y-auto flex-1">
-                  {getAvailablePlayers().map(p => {
-                    const isSelected = selectedPlayerIds.has(p.id)
-                    const unavail = roundUnavailability[p.id]
+                  {(() => {
+                    // ⚡ Bolt: Performance Optimization
+                    // Impact: Hoists match lookup outside the player render loop, avoiding O(N*M) lookups during picker display.
                     const teamMatch = roundData?.matches?.find(m => m.team_id === pickerOpen?.teamId)
                     const matchDay = teamMatch?.match_date === currentRound?.sat_date ? 'sat'
                                    : teamMatch?.match_date === currentRound?.sun_date ? 'sun'
                                    : null
-                    const unavailStatus = !unavail ? null
-                                       : unavail === 'both' ? 'red'
-                                       : matchDay && unavail !== matchDay ? 'purple'
-                                       : 'red'
-                    const unavailLabel = unavailStatus === 'purple'
-                                       ? (unavail === 'sat' ? 'Sun only' : 'Sat only')
-                                       : unavailStatus === 'red' ? 'unavailable' : null
-                    return (
-                        <div key={p.id} onClick={() => { const next = new Set(selectedPlayerIds); isSelected ? next.delete(p.id) : next.add(p.id); setSelectedPlayerIds(next) }} className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer border-b border-slate-100 text-sm ${isSelected ? 'bg-blue-50' : unavailStatus === 'red' ? 'bg-red-50 opacity-60' : unavailStatus === 'purple' ? 'bg-purple-50' : 'hover:bg-slate-50'}`}>
-                          <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300'}`}>{isSelected && '✓'}</div>
-                          <span className={`flex-1 ${unavailStatus === 'red' ? 'line-through text-slate-400' : ''}`}>{p.name}</span>
-                          {unavailLabel && <span className={`text-xs ${unavailStatus === 'purple' ? 'text-purple-500' : 'text-red-400'}`}>{unavailLabel}</span>}
-                          {p.status_id && <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: getStatusColor(p.status_id) }} />}
-                        </div>
-                    )
-                  })}
+                    return getAvailablePlayers().map(p => {
+                      const isSelected = selectedPlayerIds.has(p.id)
+                      const unavail = roundUnavailability[p.id]
+                      const unavailStatus = !unavail ? null
+                                         : unavail === 'both' ? 'red'
+                                         : matchDay && unavail !== matchDay ? 'purple'
+                                         : 'red'
+                      const unavailLabel = unavailStatus === 'purple'
+                                         ? (unavail === 'sat' ? 'Sun only' : 'Sat only')
+                                         : unavailStatus === 'red' ? 'unavailable' : null
+                      return (
+                          <div key={p.id} onClick={() => { const next = new Set(selectedPlayerIds); isSelected ? next.delete(p.id) : next.add(p.id); setSelectedPlayerIds(next) }} className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer border-b border-slate-100 text-sm ${isSelected ? 'bg-blue-50' : unavailStatus === 'red' ? 'bg-red-50 opacity-60' : unavailStatus === 'purple' ? 'bg-purple-50' : 'hover:bg-slate-50'}`}>
+                            <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 ${isSelected ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300'}`}>{isSelected && '✓'}</div>
+                            <span className={`flex-1 ${unavailStatus === 'red' ? 'line-through text-slate-400' : ''}`}>{p.name}</span>
+                            {unavailLabel && <span className={`text-xs ${unavailStatus === 'purple' ? 'text-purple-500' : 'text-red-400'}`}>{unavailLabel}</span>}
+                            {p.status_id && <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: getStatusColor(p.status_id) }} />}
+                          </div>
+                      )
+                    })
+                  })()}
                 </div>
                 <div className="px-4 py-3 border-t border-slate-200 flex justify-between items-center">
                   <span className="text-xs text-slate-500">{selectedPlayerIds.size} selected</span>
