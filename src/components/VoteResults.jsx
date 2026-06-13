@@ -45,7 +45,7 @@ export default function VoteResults({ roundId, teams, roundLabel, onClose }) {
             <h3 className="font-semibold text-slate-800">Vote Results</h3>
             <p className="text-xs text-slate-400 mt-0.5">{roundLabel}</p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">×</button>
+          <button aria-label="Close modal" onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">×</button>
         </div>
 
         {loading ? (

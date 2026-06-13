@@ -818,7 +818,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
               <div className="bg-white rounded-t-xl sm:rounded-xl shadow-2xl w-full sm:max-w-md max-h-[80vh] flex flex-col">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
                   <h3 className="font-semibold text-slate-800">Add player — {pickerOpen.teamId}</h3>
-                  <button onClick={() => setPickerOpen(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+                  <button aria-label="Close picker" onClick={() => setPickerOpen(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
                 </div>
                 <div className="px-4 py-2 border-b border-slate-100">
                   <input ref={searchRef} value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} placeholder="Search players…" className="w-full text-sm border border-slate-200 rounded px-3 py-2" />
@@ -1162,7 +1162,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
                   >
                     {emailSent ? '✓ Copied!' : '⎘ Copy to Clipboard'}
                   </button>
-                  <button onClick={() => { setShowEmailModal(false); setEmailSent(false) }} className="text-2xl leading-none text-slate-400 hover:text-slate-600">×</button>
+                  <button aria-label="Close email preview" onClick={() => { setShowEmailModal(false); setEmailSent(false) }} className="text-2xl leading-none text-slate-400 hover:text-slate-600">×</button>
                 </div>
               </div>
 
@@ -1191,7 +1191,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
                   </div>
                   <div className="flex items-center gap-3">
                     <button onClick={() => teamSheetCanvases.forEach((sheet, i) => setTimeout(() => downloadTeamSheet(sheet), i * 200))} className="px-4 py-2 text-sm bg-emerald-600 text-white rounded">Download All</button>
-                    <button onClick={() => setShowTeamSheetModal(false)} className="text-2xl leading-none">×</button>
+                    <button aria-label="Close team sheets" onClick={() => setShowTeamSheetModal(false)} className="text-2xl leading-none">×</button>
                   </div>
                 </div>
                 <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1217,7 +1217,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
                     <h3 className="font-semibold text-slate-800">Unavailability Sync</h3>
                     <p className="text-xs text-slate-400 mt-0.5">Review before importing</p>
                   </div>
-                  <button onClick={() => setShowSyncModal(false)} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">×</button>
+                  <button aria-label="Close sync modal" onClick={() => setShowSyncModal(false)} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">×</button>
                 </div>
 
                 {/* Body */}
