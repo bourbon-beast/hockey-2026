@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getPlayer, updatePlayer, getRounds, getUnavailability, addUnavailability, removeUnavailability, updateUnavailabilityDays, removeTeamPlayed } from '../db'
+import { X } from 'lucide-react'
 
 // ── Constants mirroring the survey ─────────────────────────────────────────
 const PLAYER_TYPES = [
@@ -280,7 +281,7 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
               <p className="text-xs text-gray-400 mt-1">This player won't appear in selection lists</p>
             )}
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none flex-shrink-0">×</button>
+          <button onClick={onClose} aria-label="Close modal" title="Close modal" className="text-gray-400 hover:text-gray-600 leading-none flex-shrink-0 flex items-center justify-center p-1"><X size={24} /></button>
         </div>
 
         {/* ── Body ── */}
