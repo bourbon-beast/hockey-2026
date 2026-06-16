@@ -1,14 +1,44 @@
 import { useState, useEffect } from 'react'
-import { collection, doc, getDoc, limit, onSnapshot, query, setDoc, updateDoc } from 'firebase/firestore'
+import { addDoc, collection, doc, getDoc, limit, onSnapshot, orderBy, query, setDoc, updateDoc } from 'firebase/firestore'
 import { db, auth } from '../../firebase'
 import { getPlayers } from '../../db'
-import { RefreshCw, X, UserX, Check, AlertTriangle, ChevronDown, ChevronUp, Clock } from 'lucide-react'
+import { RefreshCw, X, UserX, Check, AlertTriangle, ChevronDown, ChevronUp, Clock, Sheet } from 'lucide-react'
 
 const SYNC_UNAVAIL_URL    = import.meta.env.VITE_SYNC_UNAVAIL_URL
 const CONFIRM_UNAVAIL_URL = import.meta.env.VITE_CONFIRM_UNAVAIL_URL
 
 const emailLinkDocId = (email) =>
   String(email || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '_')
+
+const formatDays = (days) =>
+  days === 'both' ? 'Sat & Sun' : days === 'sat' ? 'Sat' : days === 'sun' ? 'Sun' : days
+
+const formatSyncedAt = (value) => {
+  if (!value) return null
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toLocaleString('en-AU', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+const SOURCE_LABELS = {
+  auto_sync:      { label: 'Auto sync',      cls: 'bg-emerald-50 text-emerald-700 border-emerald-100' },
+  sheet_sync:     { label: 'Manual sync',    cls: 'bg-slate-100 text-slate-600 border-slate-200' },
+  manual_resolve: { label: 'Queue resolved', cls: 'bg-blue-50 text-blue-700 border-blue-100' },
+  public_form:    { label: 'Form matched',   cls: 'bg-violet-50 text-violet-700 border-violet-100' },
+}
+
+async function appendSyncLog(payload) {
+  await addDoc(collection(db, 'unavailabilitySyncLog'), {
+    ...payload,
+    syncedAt: new Date().toISOString(),
+  })
+}
 
 // ── AvailabilitySync ──────────────────────────────────────────────────────────
 // Admin panel tab — two sections:
@@ -30,6 +60,10 @@ export default function AvailabilitySync() {
   const [recentLoading, setRecentLoading] = useState(true)
   const [recentError, setRecentError] = useState('')
   const [showRecent, setShowRecent] = useState(true)
+  const [syncLog, setSyncLog] = useState([])
+  const [syncLogLoading, setSyncLogLoading] = useState(true)
+  const [syncLogError, setSyncLogError] = useState('')
+  const [showSyncLog, setShowSyncLog] = useState(true)
 
   // Manual sync state
   const [syncLoading, setSyncLoading]       = useState(false)
@@ -83,9 +117,24 @@ export default function AvailabilitySync() {
     getDoc(doc(db, 'config', 'unavailIgnoredNames')).then(snap => {
       setIgnored(snap.exists() ? (snap.data().names || []) : [])
     })
+    const unsubSyncLog = onSnapshot(
+      query(collection(db, 'unavailabilitySyncLog'), orderBy('syncedAt', 'desc'), limit(50)),
+      snap => {
+        setSyncLog(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+        setSyncLogError('')
+        setSyncLogLoading(false)
+      },
+      (err) => {
+        setSyncLogError(err?.code === 'permission-denied'
+          ? 'Admin role required to view sync activity.'
+          : (err?.message || 'Could not load sync activity.'))
+        setSyncLogLoading(false)
+      }
+    )
     return () => {
       unsubQueue()
       unsubSubmissions()
+      unsubSyncLog()
     }
   }, [])
 
@@ -108,8 +157,19 @@ export default function AvailabilitySync() {
           days:     entry.day || 'both',
           source:   'manual_resolve',
           syncedAt: new Date().toISOString(),
+          sheetName: sheetName,
         }, { merge: true })
       }))
+      await Promise.all(entries.map(entry => appendSyncLog({
+        playerId: String(player.id),
+        playerName: player.name,
+        sheetName,
+        roundId: entry.round_id || 'unknown',
+        roundLabel: entry.round_id ? `Round ${entry.round_id}` : null,
+        days: entry.day || 'both',
+        source: 'manual_resolve',
+        eventType: 'new',
+      })))
       await _removeAllFromQueue(sheetName)
     } finally {
       setSaving(prev => ({ ...prev, [sheetName]: false }))
@@ -170,6 +230,16 @@ export default function AvailabilitySync() {
           syncedAt: new Date().toISOString(),
         }, { merge: true })
       }))
+      await Promise.all(entries.map(entry => appendSyncLog({
+        playerId,
+        playerName: player.name,
+        sheetName: submission.name || null,
+        roundId: String(entry.round_id),
+        roundLabel: entry.round_label || `Round ${entry.round_id}`,
+        days: entry.days || 'both',
+        source: 'public_form',
+        eventType: 'new',
+      })))
       const submittedEmail = submission.emailLower || submission.email || ''
       if (submittedEmail) {
         await setDoc(doc(db, 'unavailabilitySubmitterLinks', emailLinkDocId(submittedEmail)), {
@@ -524,6 +594,79 @@ export default function AvailabilitySync() {
               )
             })}
           </div>
+        )}
+      </div>
+
+      {/* ── Section 1b: Sheet sync activity log ── */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+        <button
+          onClick={() => setShowSyncLog(v => !v)}
+          className="w-full px-4 py-3 border-b border-slate-100 flex items-center justify-between hover:bg-slate-50 transition-colors"
+        >
+          <div className="flex items-center gap-2 text-left">
+            <Sheet size={14} className="text-slate-400 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-slate-700">Sync Activity</p>
+              <p className="text-xs text-slate-400 mt-0.5">When players were picked up from the sheet or confirmed into the roster</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {!syncLogLoading && syncLog.length > 0 && (
+              <span className="text-xs font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
+                {syncLog.length}
+              </span>
+            )}
+            {showSyncLog ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
+          </div>
+        </button>
+        <div className="px-4 py-2 text-[11px] text-slate-400 border-b border-slate-100 bg-slate-50/70">
+          Timestamps are when the sync detected the entry — e.g. if someone updates the sheet at 1:30pm Friday, the next auto-sync should show that time.
+        </div>
+
+        {showSyncLog && (
+          syncLogLoading ? (
+            <div className="px-4 py-6 text-sm text-slate-400 text-center">Loading...</div>
+          ) : syncLogError ? (
+            <div className="px-4 py-6 text-sm text-red-600 text-center">{syncLogError}</div>
+          ) : syncLog.length === 0 ? (
+            <div className="px-4 py-6 text-sm text-slate-400 text-center">No sync activity yet — entries appear here when the sheet auto-sync or manual sync picks someone up</div>
+          ) : (
+            <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+              {syncLog.map(row => {
+                const source = SOURCE_LABELS[row.source] || { label: row.source || 'Sync', cls: 'bg-slate-100 text-slate-500 border-slate-200' }
+                const pickedUp = formatSyncedAt(row.syncedAt)
+                const isUpdate = row.eventType === 'updated'
+                return (
+                  <div key={row.id} className="px-4 py-3 space-y-1.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-medium text-slate-700">{row.playerName || row.sheetName || 'Unknown'}</p>
+                          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${source.cls}`}>
+                            {source.label}
+                          </span>
+                          {isUpdate && (
+                            <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100">updated</span>
+                          )}
+                        </div>
+                        {row.sheetName && row.playerName && row.sheetName !== row.playerName && (
+                          <p className="text-xs text-slate-400 truncate mt-0.5">Sheet: {row.sheetName}</p>
+                        )}
+                      </div>
+                      {pickedUp && (
+                        <p className="text-xs text-slate-500 whitespace-nowrap shrink-0">{pickedUp}</p>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">
+                        {row.roundLabel || `Round ${row.roundId}`} · {formatDays(row.days)}
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )
         )}
       </div>
 

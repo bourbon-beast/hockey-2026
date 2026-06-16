@@ -257,7 +257,7 @@ export default function UnavailabilityManager({ onSelectPlayer }) {
               <button
                 type="button"
                 onClick={() => setShowPastRounds(v => !v)}
-                className="rounded bg-white px-2 py-1 text-xs font-semibold text-slate-500 border border-slate-200 hover:bg-slate-50"
+                className="rounded bg-white px-2 py-1 text-center text-xs font-semibold text-slate-500 border border-slate-200 hover:bg-slate-50"
               >
                 {showPastRounds ? 'Hide past' : `Show past (${pastRoundCount})`}
               </button>

@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Clock, MapPin, ChevronDown, Copy, Check, Images } from 'lucide-react'
-import { exportDigestImageTriptych } from '../utils/digestExportImages'
-import { getRounds, getRoundMatches, getDigestHistory } from '../db'
+import { Clock, MapPin, Copy, Check } from 'lucide-react'
+import { getRounds, getRoundMatches } from '../db'
 import PageHeader from './PageHeader'
 
 // ── Team display names ────────────────────────────────────────────────────────
@@ -330,204 +329,17 @@ function FixturePanel({ teams }) {
   )
 }
 
-// ── Digest panel ──────────────────────────────────────────────────────────────
-function DigestPanel() {
-  const [history, setHistory]         = useState([])
-  const [selected, setSelected]       = useState(null)
-  const [loadingHistory, setLoadingH] = useState(true)
-  const [copied, setCopied]           = useState(false)
-  const [exportingImages, setExportingImages] = useState(false)
-
-  const loadHistory = () => {
-    setLoadingH(true)
-    getDigestHistory()
-      .then(items => {
-        setHistory(items)
-        if (items.length > 0) setSelected(items[0])
-      })
-      .finally(() => setLoadingH(false))
-  }
-
-  useEffect(() => { loadHistory() }, [])
-
-  const handleCopy = async () => {
-    if (!selected) return
-    try {
-      if (selected.html && navigator.clipboard?.write) {
-        const htmlBlob = new Blob([selected.html], { type: 'text/html' })
-        const textBlob = new Blob([selected.text || ''], { type: 'text/plain' })
-        await navigator.clipboard.write([
-          new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob })
-        ])
-      } else {
-        await navigator.clipboard.writeText(selected.text || '')
-      }
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2500)
-    } catch {
-      const el = document.createElement('textarea')
-      el.value = selected.text || ''
-      document.body.appendChild(el); el.select()
-      document.execCommand('copy')
-      document.body.removeChild(el)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2500)
-    }
-  }
-
-  const handleExportImages = async () => {
-    if (!selected?.html?.trim()) return
-    setExportingImages(true)
-    try {
-      await exportDigestImageTriptych(selected.html, {
-        roundNumber: selected.roundNumber ?? null,
-      })
-    } catch (e) {
-      console.warn('Digest image export failed', e)
-      alert('Could not generate digest images — try Chrome or Safari, or check console.')
-    } finally {
-      setExportingImages(false)
-    }
-  }
-
-  if (loadingHistory) return (
-    <div className="flex items-center justify-center py-16 text-slate-400 text-sm">
-      Loading digests…
-    </div>
-  )
-
-  if (history.length === 0) return (
-    <div className="text-center py-16 text-slate-400">
-      <p className="text-base font-medium mb-1">No digests yet</p>
-      <p className="text-sm">Run <code className="bg-slate-100 px-1 rounded">syncHv</code> to generate one</p>
-    </div>
-  )
-
-  const generatedAt = selected?.generatedAt
-    ? new Date(selected.generatedAt).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })
-    : ''
-
-  return (
-    <div className="space-y-3">
-
-      {/* History selector */}
-      <div className="relative">
-        <select
-          value={selected?.id || ''}
-          onChange={e => setSelected(history.find(h => h.id === e.target.value) || null)}
-          className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200
-                     rounded-lg px-3 py-2 pr-8 appearance-none cursor-pointer
-                     focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
-        >
-          {history.map(h => (
-            <option key={h.id} value={h.id}>
-              Round {h.roundNumber}
-              {h.generatedAt
-                ? '  ·  ' + new Date(h.generatedAt).toLocaleDateString('en-AU',
-                    { day: 'numeric', month: 'short', year: 'numeric' })
-                : ''}
-            </option>
-          ))}
-        </select>
-        <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-      </div>
-
-      {/* Toolbar — generated timestamp + copy */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <span className="text-xs text-slate-400">
-          {generatedAt ? `Generated ${generatedAt}` : ''}
-        </span>
-        <div className="flex flex-wrap items-center gap-2 justify-end">
-          <button
-            type="button"
-            disabled={!selected?.html?.trim() || exportingImages}
-            title="Downloads 3 PNGs: results, next round, season stats (for WhatsApp etc.)"
-            onClick={() => handleExportImages()}
-            className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors
-                        ${(!selected?.html?.trim() || exportingImages)
-                          ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                          : 'bg-slate-700 hover:bg-slate-800 text-white'}`}>
-            <Images size={14} strokeWidth={2} className="flex-shrink-0" />
-            {exportingImages ? 'Saving PNGs…' : 'Digest images'}
-          </button>
-          <button type="button" onClick={handleCopy}
-                  className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors
-                              ${copied
-                                ? 'bg-green-600 text-white'
-                                : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
-            {copied ? '✓ Copied' : 'Copy to clipboard'}
-          </button>
-        </div>
-      </div>
-
-      {/* Preview */}
-      {selected && (
-        <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
-          {selected.html
-            ? <div className="p-4 text-sm leading-relaxed"
-                   dangerouslySetInnerHTML={{ __html: selected.html }} />
-            : <pre className="p-4 text-sm text-slate-700 whitespace-pre-wrap font-sans leading-relaxed">
-                {selected.text}
-              </pre>
-          }
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── Main export ───────────────────────────────────────────────────────────────
-export default function FixtureView({ teams, isAdmin }) {
-  // Mobile-only tab state — desktop always shows both
-  const [mobileTab, setMobileTab] = useState('fixture')
-
+export default function FixtureView({ teams }) {
   return (
     <div className="space-y-4">
 
       <PageHeader
-        title="Fixture & Results"
-        description="2026 Season · Mentone Men's Hockey"
+        title="Fixture"
+        description="2026 Season · Mentone Men's Hockey schedule"
       />
 
-      {/* ── Mobile tab switcher ── */}
-      <div className="flex sm:hidden gap-1 bg-slate-100 rounded-lg p-1">
-        {[
-          { id: 'fixture', label: 'Fixture' },
-          { id: 'digest',  label: 'Weekly Digest' },
-        ].map(t => (
-          <button key={t.id} onClick={() => setMobileTab(t.id)}
-                  className={`flex-1 text-sm font-medium py-1.5 rounded-md transition-colors
-                              ${mobileTab === t.id
-                                ? 'bg-white text-slate-800 shadow-sm'
-                                : 'text-slate-500 hover:text-slate-700'}`}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* ── Layout ── */}
-      {/* Desktop: side by side. Mobile: single panel via tab. */}
-      <div className="flex flex-col sm:flex-row gap-4 items-start">
-
-        {/* Fixture — full on desktop, conditional on mobile */}
-        <div className={`w-full sm:flex-1 sm:min-w-0 ${mobileTab !== 'fixture' ? 'hidden sm:block' : ''}`}>
-          <FixturePanel teams={teams} />
-        </div>
-
-        {/* Divider — desktop only */}
-        <div className="hidden sm:block w-px bg-slate-200 self-stretch flex-shrink-0" />
-
-        {/* Digest — desktop sidebar, conditional on mobile */}
-        <div className={`w-full sm:w-96 flex-shrink-0 ${mobileTab !== 'digest' ? 'hidden sm:block' : ''}`}>
-          {/* Desktop section heading */}
-          <div className="hidden sm:flex items-center gap-2 mb-3">
-            <h3 className="text-sm font-semibold text-slate-600">Weekly Digest</h3>
-            <div className="flex-1 h-px bg-slate-200" />
-          </div>
-          <DigestPanel />
-        </div>
-
-      </div>
+      <FixturePanel teams={teams} />
     </div>
   )
 }

@@ -123,6 +123,7 @@ The app is a single-page app. Only the public vote page has its own URL.
 - **Squad roster** — Players on the team with 2026 stats (games, goals, card points). **(Admin)**
 - **HV links** — Open team pages on hockeyvictoria.org.au. **(Admin)**
 - **Votes tab** — Per-team vote tallies and response detail by round. **(Admin)**
+- **Polls tab** — Create branded team polls with optional intro text, simple conditional follow-up questions, public links, and live responded vs outstanding tracking by name match. **(Admin)**
 - **HV name aliases** — Resolve player names that did not match after HV stats sync. **(Admin)**
 
 ### Players
@@ -322,6 +323,8 @@ Notable rules:
 | `weeklyDigests/round_N` | Saved HTML/text digests |
 | `votes/{sessionId}` | Vote session metadata (`{roundId}__{teamId}`) |
 | `votes/{sessionId}/responses` | Anonymous ballot rows |
+| `polls/{pollId}` | Team poll metadata (`questions[]`, simple `showIf`, open state) |
+| `polls/{pollId}/responses` | One response per matched player/name (written via public function) |
 | `allowedUsers/{email}` | `enabled`, `role` (`user` \| `admin`) |
 | `unavailabilitySyncs/{roundId}` | Written by functions during sheet sync (not used by client rules for direct access) |
 
@@ -339,6 +342,7 @@ Region: `australia-southeast1`. Source: `functions/main.py`.
 | `syncUnavailability` | Same | Read Google Sheet → staged JSON (no writes) |
 | `confirmUnavailabilitySync` | Same | Write confirmed rows → `playerUnavailability` |
 | `autoSyncUnavailability` | `AUTO_SYNC_SECRET` | Apps Script trigger → Firestore + unmatched queue |
+| `submitPublicPollResponse` | Public (`POST`) | Accept public poll response, match by team player name, enforce one response per matched player/name, write `polls/{pollId}/responses` |
 
 The Admin UI calls these via `VITE_SYNC_*` and `VITE_CONFIRM_*` URLs in `.env.uat` / `.env.production`.
 

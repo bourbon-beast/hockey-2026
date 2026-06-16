@@ -76,6 +76,7 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
     is_new_registration:   player.is_new_registration === 1,
     is_international:      player.is_international === 1,
     needs_visa:            player.needs_visa === 1,
+    is_not_financial:      player.is_not_financial === 1,
     // Survey fields
     player_type:           player.player_type || '',
     interested_in:         player.interested_in || '',
@@ -114,6 +115,7 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
           is_new_registration:   data.is_new_registration === 1,
           is_international:      data.is_international === 1,
           needs_visa:            data.needs_visa === 1,
+          is_not_financial:      data.is_not_financial === 1,
           player_type:           data.player_type || '',
           interested_in:         data.interested_in || '',
           previous_club:         data.previous_club || '',
@@ -223,6 +225,7 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
       is_new_registration:   form.is_new_registration,
       is_international:      form.is_international,
       needs_visa:            form.needs_visa,
+      is_not_financial:      form.is_not_financial,
       player_type:           form.player_type || null,
       interested_in:         form.interested_in || null,
       previous_club:         form.previous_club || null,
@@ -274,6 +277,9 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
               )}
               {form.needs_visa && (
                 <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-700">Needs Visa</span>
+              )}
+              {form.is_not_financial && (
+                <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">Not Financial</span>
               )}
             </div>
             {!form.is_active && (
@@ -415,6 +421,32 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
                   <span className="text-sm font-medium text-gray-700">Needs visa</span>
                 </label>
               )}
+            </div>
+          </Section>
+
+          <Divider />
+
+          {/* ── Financial Status ── */}
+          <Section title="Financial Status">
+            <div className="flex flex-col gap-3">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <div
+                  role="switch"
+                  aria-checked={form.is_not_financial}
+                  tabIndex={0}
+                  onClick={() => set('is_not_financial', !form.is_not_financial)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      set('is_not_financial', !form.is_not_financial);
+                    }
+                  }}
+                  className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 ${form.is_not_financial ? 'bg-amber-500' : 'bg-gray-200'}`}
+                >
+                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${form.is_not_financial ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </div>
+                <span className="text-sm font-medium text-gray-700">Not Financial (shows superscript $)</span>
+              </label>
             </div>
           </Section>
 

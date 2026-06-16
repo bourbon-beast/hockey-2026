@@ -41,6 +41,25 @@ service cloud.firestore {
           && get(userAccessDoc()).data.role == 'admin');
     }
 
+    function pollData(pollId) {
+      return get(/databases/$(database)/documents/polls/$(pollId)).data;
+    }
+
+    function authEmailLower() {
+      return request.auth.token.email.lower();
+    }
+
+    // Public unless isPrivate is explicitly true. Admins see all; others see public + own private.
+    function pollIsPublic(data) {
+      return !('isPrivate' in data) || data.isPrivate != true;
+    }
+
+    function canBrowsePoll(data) {
+      return isTrackerAdmin()
+        || pollIsPublic(data)
+        || (data.createdByEmail != null && data.createdByEmail == authEmailLower());
+    }
+
     // Squad tracker collections.
     match /config/{docId} {
       allow read, write: if isApprovedTrackerUser();
@@ -68,6 +87,11 @@ service cloud.firestore {
       // Admin-maintained email-to-player links used by public lookup functions.
       allow read, write: if isTrackerAdmin();
     }
+    match /unavailabilitySyncLog/{logId} {
+      // Sheet auto-sync and manual sync pickup history (admin activity feed).
+      allow read, create: if isTrackerAdmin();
+      allow update, delete: if false;
+    }
     match /votes/{voteId} {
       // Public vote links can read a known session doc; listing sessions is tracker-only.
       allow get: if true;
@@ -77,6 +101,19 @@ service cloud.firestore {
     match /votes/{voteId}/responses/{responseId} {
       allow create: if true;
       allow read, update, delete: if isTrackerAdmin();
+    }
+    match /polls/{pollId} {
+      // Public poll links: read one poll by id without signing in.
+      allow get: if true;
+      // Registry: any approved tracker user may list/browse polls that are public or their own private polls.
+      allow list: if isApprovedTrackerUser() && canBrowsePoll(resource.data);
+      allow create, update, delete: if isTrackerAdmin();
+    }
+    match /polls/{pollId}/responses/{responseId} {
+      // Public responses are written by Cloud Function only.
+      allow create: if false;
+      allow read: if isApprovedTrackerUser() && canBrowsePoll(pollData(pollId));
+      allow update, delete: if isTrackerAdmin();
     }
     match /allowedUsers/{email} {
       allow get: if isSignedIn() && request.auth.token.email == email;

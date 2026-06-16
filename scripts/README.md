@@ -5,7 +5,7 @@ Maintenance and sync scripts for MHC Squad Tracker. Run from the **project root*
 Service account JSON files stay in the repo root (gitignored). See `docs/README.md` Part 3 for setup.
 
 ```bash
-pip install firebase-admin openpyxl requests beautifulsoup4
+pip install firebase-admin openpyxl requests beautifulsoup4 resend
 ```
 
 ## Recurring / season operations
@@ -29,6 +29,8 @@ Prefer **Admin → HV Sync** in the app when possible; these CLIs are for local 
 | Script | Purpose |
 |--------|---------|
 | [`apps-script-unavail-trigger.js`](apps-script-unavail-trigger.js) | Copy into Google Apps Script for sheet → `autoSyncUnavailability` |
+| [`backfill_poll_is_private.py`](backfill_poll_is_private.py) | Set `isPrivate: false` on legacy polls missing the field (needed for non-admin list queries) |
+| [`send_resend_test_email.py`](send_resend_test_email.py) | Send a basic test email through Resend |
 
 ## Archive (one-off / historical)
 

@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useRoundManager } from './useRoundManager'
 import { buildTeamCanvas } from './roundUtils'
+import { validateRound } from '../utils/eligibility'
 import TeamColumn from './TeamColumn'
 import { generateEmailHtml } from '../utils/generateEmailHtml'
 import { auth } from '../firebase'
@@ -16,7 +17,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
   const { state, actions, getters } = useRoundManager()
   const {
     teams, allPlayers, rounds, currentRound, roundData, loading, roundUnavailability,
-    seasonRounds, practiceRounds
+    teamRankings, seasonRounds, practiceRounds
   } = state
 
   // View States
@@ -141,6 +142,13 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
   const duplicateIds = getters.getDuplicatePlayerIds()
   const playerTeamMap = roundData ? Object.fromEntries(roundData.selections.map(s => [s.player_id, s.team_id])) : {}
 
+  // HV eligibility validation — selection.id → { status, reasons } (warn, never block)
+  const eligibilityResults = useMemo(() => {
+    if (!roundData?.selections?.length || currentRound?.round_type !== 'season') return new Map()
+    const playersById = new Map(allPlayers.map(p => [p.id, p]))
+    return validateRound(roundData.selections, playersById, teamRankings.rankings, teamRankings.roundsInSeason)
+  }, [roundData?.selections, allPlayers, teamRankings, currentRound?.round_type])
+
   const getAvailablePlayers = () => {
     const selected = new Set(roundData?.selections.filter(s => s.team_id === pickerOpen?.teamId).map(s => s.player_id))
     const allSelectedInRound = new Set(roundData?.selections.map(s => s.player_id))
@@ -227,7 +235,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
     const sheets = ['PL', 'PLR', 'PB', 'PC', 'PE', 'Metro'].map(tid => {
       const match = (roundData.matches || []).find(m => m.team_id === tid) || {}
       const players = (roundData.selections || []).filter(s => s.team_id === tid && !s.is_unavailable).sort((a, b) => a.slot_number - b.slot_number)
-      const canvas = buildTeamCanvas(tid, match, players, roundLabel, duplicateIds)
+      const canvas = buildTeamCanvas(tid, match, players, roundLabel, duplicateIds, eligibilityResults)
       return { teamId: tid, dataUrl: canvas.toDataURL('image/png'), roundLabel }
     })
     setTeamSheetCanvases(sheets)
@@ -250,7 +258,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
     const players = roundData.selections
       .filter(s => s.team_id === teamId && !s.is_unavailable)
       .sort((a, b) => a.slot_number - b.slot_number)
-      .map(s => s.name)
+      .map(s => s.is_not_financial === 1 ? `${s.name} [$]` : s.name)
     const content = players.join('\n')
     const link = document.createElement('a')
     link.download = `${teamId}-${roundLabel}.txt`
@@ -804,6 +812,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer, isAdmin }) {
                       actions={actions}
                       getters={getters}
                       duplicateIds={duplicateIds}
+                      eligibilityResults={eligibilityResults}
                       onSelectPlayer={onSelectPlayer}
                       setPickerOpen={setPickerOpen}
                       onCreateVoteLink={openVotingLinks}

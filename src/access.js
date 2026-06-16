@@ -12,3 +12,9 @@ export function isBootstrapAdmin(userOrEmail) {
 export function isAdminUser(user, allowedUser = null) {
   return isBootstrapAdmin(user) || allowedUser?.role === 'admin'
 }
+
+export function canViewPoll(poll, userEmail, isAdmin) {
+  if (isAdmin) return true
+  if (!poll?.isPrivate) return true
+  return normaliseEmail(poll.createdByEmail) === normaliseEmail(userEmail)
+}

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { getPlayers, createPlayer } from '../db'
 import PageHeader from './PageHeader'
+import { generateNonFinancialHtml, generateNonFinancialPlainText, buildNonFinancialCanvas } from '../utils/generateNonFinancialHtml'
 
 /** Weighted card points — matches digest `_build_leaders` CARD_WEIGHTS in functions/main.py */
 function cardPoints(s26) {
@@ -143,6 +144,13 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
   const [sortDir, setSortDir]           = useState('asc')
   const [showAddModal, setShowAddModal] = useState(false)
   const [showInactive, setShowInactive] = useState(false)
+  const [nonFinancialOnly, setNonFinancialOnly] = useState(false)
+  const [showExportModal, setShowExportModal] = useState(false)
+  const [exportHtml, setExportHtml] = useState('')
+  const [exportText, setExportText] = useState('')
+  const [exportCopied, setExportCopied] = useState(false)
+  const [exportLoading, setExportLoading] = useState(false)
+  const [exportPlayerList, setExportPlayerList] = useState([])
 
   const loadPlayers = () => {
     getPlayers(showInactive).then(setPlayers)
@@ -154,6 +162,7 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
     .filter(p => {
       if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false
       if (statusFilters.size > 0 && !statusFilters.has(p.status_id)) return false
+      if (nonFinancialOnly && p.is_not_financial !== 1) return false
       return true
     })
     .sort((a, b) => {
@@ -188,6 +197,50 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
   }
 
   const inactiveCount = players.filter(p => p.is_active === 0).length
+  const nonFinancialCount = players.filter(p => p.is_not_financial === 1).length
+
+  const buildNonFinancialExportList = (list) =>
+    list
+      .filter(p => p.is_not_financial === 1 && p.is_active !== 0)
+      .sort((a, b) => a.name.localeCompare(b.name))
+
+  const openNonFinancialExport = async () => {
+    setExportLoading(true)
+    try {
+      const all = await getPlayers(false)
+      const exportList = buildNonFinancialExportList(all)
+      setExportPlayerList(exportList)
+      setExportHtml(generateNonFinancialHtml(exportList))
+      setExportText(generateNonFinancialPlainText(exportList))
+      setExportCopied(false)
+      setShowExportModal(true)
+    } finally {
+      setExportLoading(false)
+    }
+  }
+
+  const copyNonFinancialExport = async () => {
+    try {
+      if (navigator.clipboard?.write) {
+        const htmlBlob = new Blob([exportHtml], { type: 'text/html' })
+        const textBlob = new Blob([exportText], { type: 'text/plain' })
+        await navigator.clipboard.write([
+          new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob }),
+        ])
+      } else {
+        await navigator.clipboard.writeText(exportText)
+      }
+      setExportCopied(true)
+    } catch { /* ignore */ }
+  }
+
+  const downloadNonFinancialImage = () => {
+    const canvas = buildNonFinancialCanvas(exportPlayerList)
+    const link = document.createElement('a')
+    link.download = 'MHC-Non-financial-players.png'
+    link.href = canvas.toDataURL('image/png')
+    link.click()
+  }
 
   return (
     <div className="space-y-4">
@@ -243,6 +296,27 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
           )}
         </div>
 
+        {/* Non-financial filter */}
+        <button
+          onClick={() => setNonFinancialOnly(v => !v)}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs transition-colors ${
+            nonFinancialOnly
+              ? 'bg-amber-500 text-white border-amber-500'
+              : 'bg-white text-gray-500 border-gray-300 hover:border-gray-400'
+          }`}
+        >
+          <span className={`font-bold ${nonFinancialOnly ? 'text-white' : 'text-amber-500'}`}>$</span>
+          {nonFinancialOnly ? `Non-financial (${nonFinancialCount})` : 'Non-financial only'}
+        </button>
+
+        <button
+          onClick={openNonFinancialExport}
+          disabled={exportLoading}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-xs font-medium hover:bg-amber-100 disabled:opacity-50"
+        >
+          {exportLoading ? 'Loading…' : 'Export HTML'}
+        </button>
+
         {/* Inactive toggle */}
         <button
           onClick={() => setShowInactive(v => !v)}
@@ -287,7 +361,12 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
                 >
                   <td className="px-4 py-3 font-medium text-gray-800">
                     <div className="flex items-center gap-2">
-                      {player.name}
+                      <span>
+                        {player.name}
+                        {player.is_not_financial === 1 && (
+                          <sup className="text-[10px] font-bold text-amber-500 ml-0.5 align-super" title="Not financial">$</sup>
+                        )}
+                      </span>
                       {isInactive && (
                         <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-gray-200 text-gray-500">Inactive</span>
                       )}
@@ -321,6 +400,51 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
           <div className="text-center py-12 text-gray-400 text-sm">No players match your filters</div>
         )}
       </div>
+
+      {/* Non-financial HTML export */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-start justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl mt-4 mb-8">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <div>
+                <h3 className="font-semibold text-lg">Non-financial players</h3>
+                <p className="text-xs text-slate-400 mt-0.5">Preview below — copy and paste into email or docs</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={downloadNonFinancialImage}
+                  className="px-4 py-2 text-sm rounded font-medium bg-slate-700 text-white hover:bg-slate-800 transition-colors"
+                >
+                  Download Image
+                </button>
+                <button
+                  onClick={copyNonFinancialExport}
+                  className={`px-4 py-2 text-sm rounded font-medium transition-colors ${
+                    exportCopied ? 'bg-green-600 text-white' : 'bg-blue-700 text-white hover:bg-blue-800'
+                  }`}
+                >
+                  {exportCopied ? '✓ Copied!' : '⎘ Copy to Clipboard'}
+                </button>
+                <button
+                  onClick={() => { setShowExportModal(false); setExportCopied(false) }}
+                  className="text-2xl leading-none text-slate-400 hover:text-slate-600"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+            <div className="p-4">
+              <iframe
+                srcDoc={exportHtml}
+                title="Non-financial players preview"
+                className="w-full border border-slate-200 rounded-lg"
+                style={{ height: '60vh' }}
+                sandbox="allow-same-origin"
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Player Modal */}
       {showAddModal && (

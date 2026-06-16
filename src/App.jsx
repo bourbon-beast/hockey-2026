@@ -1,26 +1,30 @@
 import { useState, useEffect } from 'react'
-import { ClipboardList, Calendar, UserX, Users, LayoutGrid, MoreHorizontal, Settings, Vote } from 'lucide-react'
+import { ClipboardCheck, ClipboardList, Calendar, Newspaper, UserX, Users, LayoutGrid, MoreHorizontal, Settings, Vote } from 'lucide-react'
 import TeamView from './components/TeamView'
 import AllPlayers from './components/AllPlayers'
 import RoundPlanner from './components/RoundPlanner'
 import PlayerModal from './components/PlayerModal'
 import UnavailabilityManager from './components/UnavailabilityManager'
 import FixtureView from './components/FixtureView'
+import DigestView from './components/DigestView'
 import AdminView from './components/AdminView'
 import VotingOverview from './components/VotingOverview'
+import PollsView from './components/PollsView'
 import UnavailBadge from './components/UnavailBadge'
 import LoginPage from './components/LoginPage'
 import { getTeams, getStatuses } from './db'
 import { getAllowedUser } from './db.access'
-import { subscribeToAuthToken, signOutUser } from './auth'
+import { subscribeToAuth, signOutUser } from './auth'
 import { isAdminUser, isBootstrapAdmin } from './access'
 
 const NAV = [
   { id: 'round',   label: 'Planner',       Icon: ClipboardList },
   { id: 'fixture', label: 'Fixture',       Icon: Calendar      },
+  { id: 'digest',  label: 'Digest',        Icon: Newspaper      },
   { id: 'unavail', label: 'Availability',  Icon: UserX         },
-  { id: 'team',    label: 'Teams',         Icon: LayoutGrid,   adminOnly: true },
+  { id: 'team',    label: 'Teams',         Icon: LayoutGrid    },
   { id: 'players', label: 'Players',       Icon: Users,        adminOnly: true },
+  { id: 'polls',   label: 'Polls',         Icon: ClipboardCheck },
   { id: 'votes',   label: 'Votes',         Icon: Vote,         adminOnly: true },
   { id: 'admin',   label: 'Admin',         Icon: Settings,     adminOnly: true },
 ]
@@ -57,10 +61,15 @@ function App() {
   const [bootstrapLoading, setBootstrapLoading] = useState(true)
   const [bootstrapError, setBootstrapError] = useState('')
   const [bootstrapVersion, setBootstrapVersion] = useState(0)
+  const [pollsTeamFilter, setPollsTeamFilter] = useState('')
   const isAllowed = isBootstrapAdmin(user) || allowedUser?.enabled === true
   const isAdmin = isAdminUser(user, allowedUser)
 
-  useEffect(() => subscribeToAuthToken(currentUser => {
+  // Subscribe to sign-in/sign-out only (onAuthStateChanged). NOT onIdTokenChanged
+  // — that fires on every hourly token refresh, re-running the access gate below
+  // and bouncing non-bootstrap users to the login screen. On-demand getIdToken()
+  // still mints fresh tokens for Cloud Function calls.
+  useEffect(() => subscribeToAuth(currentUser => {
     setUser(currentUser)
     setAuthReady(true)
   }), [])
@@ -86,7 +95,7 @@ function App() {
       }
 
       try {
-        const record = await getAllowedUser(user.email)
+        const record = await getAllowedUser(user.email)  // retries transient failures internally
         if (!cancelled) setAllowedUser(record)
       } catch (e) {
         console.error('Failed to check tracker access', e)
@@ -99,7 +108,9 @@ function App() {
     loadAccess()
 
     return () => { cancelled = true }
-  }, [authReady, user])
+    // Depend on uid, not the user object — a new object for the same uid (e.g. a
+    // token refresh) must not re-run the access gate. eslint-disable-next-line below.
+  }, [authReady, user?.uid]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!authReady || !accessReady) return
@@ -149,6 +160,11 @@ function App() {
 
   const refresh = () => setRefreshKey(k => k + 1)
   const retryBootstrap = () => setBootstrapVersion(v => v + 1)
+  const openPollsForTeam = (teamId) => {
+    setPollsTeamFilter(teamId)
+    setView('polls')
+    setShowMoreMenu(false)
+  }
   const openPlayer  = (player) => setSelectedPlayer(player)
   const closePlayer = () => { setSelectedPlayer(null); refresh() }
 
@@ -221,7 +237,10 @@ function App() {
             {NAV.filter(n => !n.adminOnly || isAdmin).map(n => (
               <button
                 key={n.id}
-                onClick={() => setView(n.id)}
+                onClick={() => {
+                  if (n.id === 'polls') setPollsTeamFilter('')
+                  setView(n.id)
+                }}
                 className={`relative flex flex-col items-center justify-center gap-1 px-4 py-2 rounded-md text-xs font-medium transition-colors ${
                   view === n.id
                     ? 'text-blue-600'
@@ -260,10 +279,12 @@ function App() {
       {/* Main content — bottom padding on mobile to clear tab bar */}
       <main className="p-3 sm:p-6 pb-20 sm:pb-6">
         {view === 'players' && isAdmin && <FramedPage><AllPlayers statuses={statuses} teams={teams} onSelectPlayer={openPlayer} refreshKey={refreshKey} onRefresh={refresh} /></FramedPage>}
-        {view === 'team'    && isAdmin && <FramedPage><TeamView teams={teams} statuses={statuses} selectedTeam={selectedTeam} onSelectTeam={setSelectedTeam} onSelectPlayer={openPlayer} refreshKey={refreshKey} onRefresh={refresh} isAdmin={isAdmin} /></FramedPage>}
+        {view === 'team'    && <FramedPage><TeamView teams={teams} selectedTeam={selectedTeam} onSelectTeam={setSelectedTeam} onSelectPlayer={openPlayer} refreshKey={refreshKey} isAdmin={isAdmin} userEmail={user?.email} onViewAllPolls={openPollsForTeam} /></FramedPage>}
         {view === 'round'   && <RoundPlanner statuses={statuses} onSelectPlayer={openPlayer} isAdmin={isAdmin} />}
         {view === 'unavail' && <UnavailabilityManager onSelectPlayer={openPlayer} />}
         {view === 'fixture' && <FramedPage><FixtureView teams={teams} isAdmin={isAdmin} /></FramedPage>}
+        {view === 'digest'  && <FramedPage><DigestView /></FramedPage>}
+        {view === 'polls'   && <FramedPage><PollsView teams={teams} isAdmin={isAdmin} userEmail={user?.email} teamFilter={pollsTeamFilter} onTeamFilterChange={setPollsTeamFilter} /></FramedPage>}
         {view === 'votes'   && isAdmin && <FramedPage><VotingOverview teams={teams} /></FramedPage>}
         {view === 'admin'   && isAdmin && <FramedPage><AdminView /></FramedPage>}
       </main>
@@ -309,7 +330,11 @@ function App() {
             {NAV.filter(n => !MOBILE_TABS.includes(n.id) && (!n.adminOnly || isAdmin)).map(n => (
               <button
                 key={n.id}
-                onClick={() => { setView(n.id); setShowMoreMenu(false) }}
+                onClick={() => {
+                  if (n.id === 'polls') setPollsTeamFilter('')
+                  setView(n.id)
+                  setShowMoreMenu(false)
+                }}
                 className={`w-full flex items-center gap-3 px-5 py-3.5 text-sm font-medium border-b border-slate-100 ${
                   view === n.id ? 'text-blue-600 bg-blue-50' : 'text-slate-700'
                 }`}

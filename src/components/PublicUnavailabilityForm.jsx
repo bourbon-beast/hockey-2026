@@ -381,7 +381,7 @@ export default function PublicUnavailabilityForm() {
                   <button
                     type="button"
                     onClick={() => setShowPastRounds(v => !v)}
-                    className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-50"
+                    className="rounded-lg border border-slate-200 px-2 py-1 text-center text-xs font-semibold text-slate-500 hover:bg-slate-50"
                   >
                     {showPastRounds ? 'Hide past' : `Show past (${hiddenPastRoundCount})`}
                   </button>
@@ -390,12 +390,12 @@ export default function PublicUnavailabilityForm() {
                   <button
                     type="button"
                     onClick={cancelEdit}
-                    className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-50"
+                    className="rounded-lg border border-slate-200 px-2 py-1 text-center text-xs font-semibold text-slate-500 hover:bg-slate-50"
                   >
                     Clear form
                   </button>
                 )}
-                <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500">
+                <span className="rounded-full bg-slate-100 px-2 py-1 text-center text-xs font-semibold text-slate-500">
                   {selectedEntries.length} selected
                 </span>
               </div>

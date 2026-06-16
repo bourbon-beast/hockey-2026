@@ -57,7 +57,15 @@ const cRR = (ctx, x, y, w, h, r) => {
 
 const cCap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : ''
 
-export const buildTeamCanvas = (tid, match, players, roundLabel, duplicateIds = new Set()) => {
+// Eligibility badge palette for canvas export — mirrors the in-app badge:
+// red = breach, amber = warning, orange = legal double-up
+const ELIG_CANVAS_COLOURS = {
+    breach:  { fill: '#fee2e2', stroke: '#ef4444', text: '#b91c1c' },
+    warning: { fill: '#fef3c7', stroke: '#f59e0b', text: '#92400e' },
+    ok:      { fill: '#ffedd5', stroke: '#fb923c', text: '#c2410c' },
+}
+
+export const buildTeamCanvas = (tid, match, players, roundLabel, duplicateIds = new Set(), eligibilityResults = new Map()) => {
     const W = 480
     const PAD = 24
     const CLUB_H = 90
@@ -220,16 +228,19 @@ export const buildTeamCanvas = (tid, match, players, roundLabel, duplicateIds = 
         const nameSuffix = isUnavail ? ' (unavailable)' : ''
         ctx.fillText(p.name + nameSuffix, PAD + 34, ry + 27)
 
-        // DU badge
-        if (isDupe) {
-            const duLabel = 'DU'
+        // Eligibility badge — tag label where set ("ETS"/"DGK"/"EX"), else "DU";
+        // colour reflects validation status so breaches carry onto the team sheet
+        const eligResult = p.id != null ? eligibilityResults.get(p.id) : null
+        if (isDupe || p.eligibility_tag) {
+            const duLabel = p.eligibility_tag === 'EXEMPT' ? 'EX' : (p.eligibility_tag || 'DU')
+            const colours = ELIG_CANVAS_COLOURS[eligResult?.status || 'ok']
             ctx.font = 'bold 11px system-ui, -apple-system, sans-serif'
             const duW = ctx.measureText(duLabel).width + 10
             const duX = W - PAD - duW - 4
             cRR(ctx, duX, ry + 10, duW, 18, 4)
-            ctx.fillStyle = '#ffedd5'; ctx.fill()
-            ctx.strokeStyle = '#fb923c'; ctx.lineWidth = 1; ctx.stroke()
-            ctx.fillStyle = '#c2410c'
+            ctx.fillStyle = colours.fill; ctx.fill()
+            ctx.strokeStyle = colours.stroke; ctx.lineWidth = 1; ctx.stroke()
+            ctx.fillStyle = colours.text
             ctx.fillText(duLabel, duX + 5, ry + 23)
         }
     })

@@ -32,6 +32,7 @@ from bs4 import BeautifulSoup
 import firebase_admin
 from firebase_admin import firestore as fs
 from firebase_functions import https_fn
+from google.api_core.exceptions import AlreadyExists
 
 REGION = 'australia-southeast1'
 
@@ -362,6 +363,9 @@ def parse_game_stats(game_url):
                 except ValueError:
                     return 0
 
+            # TODO(eligibility): no permit marker found in HV game page markup yet.
+            # If one appears, capture it as permit=True here in the same pass
+            # (see docs/ELIGIBILITY-ENGINE.md section 5.4).
             players.append({
                 'hv_name':      hv_name,
                 'attended':     attended,
@@ -459,11 +463,16 @@ def _match_hv_players(hv_stats, all_players, hv_aliases):
 
 def sync_player_stats(db, info):
     """
-    1. For each played match doc that has hvGameUrl but no statsLastSync:
+    1. For each match doc with an hvGameUrl that either was played within the
+       last 7 days (late goal/card entries) or has no statsLastSync stamp
+       (never scraped, or cleared by forceRescrape / alias resolution):
        - Scrape parse_game_stats, store raw playerStats array on the match doc
        - Mark statsLastSync timestamp
     2. After scraping, recompute season totals from ALL stored playerStats
        across all match docs and batch-write to players/{id}.
+
+    Because each scraped match is stamped, a timed-out full rescrape resumes
+    where it left off when called again.
 
     Returns list of unmatched HV names (for admin resolution UI).
     """
@@ -476,8 +485,9 @@ def sync_player_stats(db, info):
 
     # ── Determine rescrape window ─────────────────────────────────────────────
     # Re-scrape any match played within the last 7 days — captures all late
-    # goal/card entries from the weekend just gone. Older matches are settled.
-    # TODO: add admin endpoint to force-rescrape a specific round by number.
+    # goal/card entries from the weekend just gone. Older matches are settled
+    # unless their statsLastSync stamp is missing/cleared (forceRescrape on
+    # syncPlayerStats, or an HV alias resolution).
     today = date.today()
     rescrape_cutoff = (today - timedelta(days=7)).isoformat()
     info(f'   🔄 Re-scraping matches since {rescrape_cutoff}')
@@ -497,11 +507,21 @@ def sync_player_stats(db, info):
 
         for match_doc in matches_snap:
             match_data  = match_doc.to_dict()
-            hv_url      = match_data.get('hvGameUrl', '')
-            match_date  = match_data.get('matchDate', '')
+            # `or ''` coerces explicit null (not just missing key) to '' so the
+            # date comparison below can't hit None >= str.
+            hv_url      = match_data.get('hvGameUrl') or ''
+            match_date  = match_data.get('matchDate') or ''
 
-            # Only rescrape matches played within the last 7 days
-            if not hv_url or match_date < rescrape_cutoff:
+            # Rescrape recent matches (late stat entries), any match never
+            # stamped (forceRescrape backfills, alias resolutions), and any
+            # played match left with empty playerStats — the latter self-heals
+            # a previous scrape that stored nothing (e.g. a transient fetch
+            # blip cementing an empty roster).
+            played_but_empty = bool(match_data.get('result')) and not match_data.get('playerStats')
+            needs_rescrape = (match_date >= rescrape_cutoff
+                              or not match_data.get('statsLastSync')
+                              or played_but_empty)
+            if not hv_url or not needs_rescrape:
                 continue
 
             team_id = match_doc.id
@@ -511,6 +531,14 @@ def sync_player_stats(db, info):
                 raw_stats = parse_game_stats(hv_url)
             except Exception as e:
                 info(f'      Error scraping {hv_url}: {e}')
+                continue
+
+            # An empty parse means a fetch blip or transient HV hiccup, not a
+            # real result — parse_game_stats can't tell them apart (it swallows
+            # fetch errors and returns []). Never stamp/overwrite on empty:
+            # skip so the match retries next run and any prior good stats stay.
+            if not raw_stats:
+                info(f'      No roster rows parsed for {hv_url} — leaving for retry')
                 continue
 
             # Resolve player IDs
@@ -585,6 +613,7 @@ def sync_player_stats(db, info):
                         'goals': 0, 'greenCards': 0, 'yellowCards': 0,
                         'redCards': 0, 'gk': 0, 'ets': 0,
                         'gamesPerTeam': {},
+                        'statsPerTeam': {},
                         'lastGoalDate': '',
                         'lastCardDate': '',
                     }
@@ -600,6 +629,18 @@ def sync_player_stats(db, info):
                 t['gk']          += ps.get('gk', 0)
                 t['ets']         += ps.get('ets', 0)
                 t['gamesPerTeam'][team_id] = t['gamesPerTeam'].get(team_id, 0) + 1
+                if team_id not in t['statsPerTeam']:
+                    t['statsPerTeam'][team_id] = {
+                        'goals': 0, 'greenCards': 0, 'yellowCards': 0,
+                        'redCards': 0, 'gk': 0, 'ets': 0,
+                    }
+                ts = t['statsPerTeam'][team_id]
+                ts['goals']       += goals_this
+                ts['greenCards']  += ps.get('greenCards', 0)
+                ts['yellowCards'] += ps.get('yellowCards', 0)
+                ts['redCards']    += ps.get('redCards', 0)
+                ts['gk']          += ps.get('gk', 0)
+                ts['ets']         += ps.get('ets', 0)
                 # Track most recent match date where player scored / got carded
                 if goals_this > 0 and match_date > t['lastGoalDate']:
                     t['lastGoalDate'] = match_date
@@ -614,8 +655,20 @@ def sync_player_stats(db, info):
 
     for player_id, t in totals.items():
         games_per_team  = t.pop('gamesPerTeam')
+        stats_per_team  = t.pop('statsPerTeam')
         teams_played    = [tid for tid, cnt in games_per_team.items() if cnt > 0]
         total_games     = sum(games_per_team.values())
+        stats_2026_by_team = {
+            tid: {
+                'goals':         s['goals'],
+                'greenCards':    s['greenCards'],
+                'yellowCards':   s['yellowCards'],
+                'redCards':      s['redCards'],
+                'gkAppearances': s['gk'],
+                'ets':           s['ets'],
+            }
+            for tid, s in stats_per_team.items()
+        }
 
         player_ref = db.collection('players').document(str(player_id))
         batch.set(player_ref, {
@@ -629,6 +682,7 @@ def sync_player_stats(db, info):
                 'lastGoalDate':  t['lastGoalDate'],
                 'lastCardDate':  t['lastCardDate'],
             },
+            'stats2026ByTeam':   stats_2026_by_team,
             'gamesPlayed2026':   games_per_team,
             'teamsPlayed2026':   teams_played,
             'totalGames2026':    total_games,
@@ -1325,6 +1379,15 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
         info(f'⚠️  Ladder load failed: {e}')
         ladder_data = {}
 
+    ladder_summary = {}
+    for team_id, data in ladder_data.items():
+        if data and not data.get('error'):
+            ladder_summary[team_id] = {
+                'position': data.get('position'),
+                'total': data.get('total'),
+                'inFinals': data.get('inFinals'),
+            }
+
     text_output   = format_text(summaries, leaders, ladder_data, weekly_notes)
     html_output   = format_html(summaries, leaders, ladder_data, weekly_notes)
     serial_output = [serialise(s) for s in summaries]
@@ -1338,13 +1401,18 @@ def syncHv(req: https_fn.Request) -> https_fn.Response:
     next_round_nums = [s['next_fixture']['round'] for s in summaries if s.get('next_fixture')]
     digest_round    = next_round_nums[0] if next_round_nums else None
 
-    # Always write hvSync/latest (keeps existing DigestPanel working)
-    db.collection('hvSync').document('latest').set({
+    # Always write hvSync/latest (keeps existing DigestPanel working).
+    # Merge so syncHv cannot wipe the ladder summary that syncLadder just wrote.
+    latest_payload = {
         'syncedAt': now_iso, 'text': text_output,
         'html': html_output, 'summaries': serial_output,
         'subject': subject,
         'weeklyNotes': weekly_notes or '',
-    })
+    }
+    if ladder_summary:
+        latest_payload['ladders'] = ladder_summary
+
+    db.collection('hvSync').document('latest').set(latest_payload, merge=True)
     info('\n💾 Saved hvSync/latest')
 
     # Write versioned digest — overwrite if re-run for same round
@@ -1718,6 +1786,40 @@ def _get_seen_names(db, round_id):
     return set()
 
 
+def _round_label(round_doc):
+    if not round_doc:
+        return None
+    if round_doc.get('roundNumber'):
+        return f"Round {round_doc['roundNumber']}"
+    return round_doc.get('name')
+
+
+def _unavail_pickup_event(existing_data, sheet_name, seen_names, new_days):
+    """Return 'new', 'updated', or None when a sheet sync should be logged."""
+    if sheet_name not in seen_names:
+        return 'new'
+    if existing_data and existing_data.get('days') != new_days:
+        return 'updated'
+    return None
+
+
+def _append_unavail_sync_log(batch, db, *, player_id, player_name, sheet_name,
+                             round_id, round_label, days, source, event_type):
+    """Append one row to unavailabilitySyncLog (admin activity feed)."""
+    log_ref = db.collection('unavailabilitySyncLog').document()
+    batch.set(log_ref, {
+        'playerId':   str(player_id),
+        'playerName': player_name,
+        'sheetName':  sheet_name,
+        'roundId':    str(round_id),
+        'roundLabel': round_label,
+        'days':       days,
+        'source':     source,
+        'eventType':  event_type,
+        'syncedAt':   datetime.utcnow().isoformat() + 'Z',
+    })
+
+
 def _consolidate(matched):
     """
     Combine sat+sun entries for the same player+round into a single record.
@@ -1780,6 +1882,190 @@ def _valid_public_email(value):
 def _public_email_doc_id(value):
     return re.sub(r'[^a-z0-9._-]', '_', _normalise_public_email(value))
 
+def _public_poll_cors(methods='POST, OPTIONS'):
+    return {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': methods,
+        'Access-Control-Allow-Headers': 'Content-Type',
+    }
+
+def _player_email_candidates(player_data):
+    if not isinstance(player_data, dict):
+        return []
+    values = [
+        player_data.get('email'),
+        player_data.get('emailLower'),
+        player_data.get('emailAddress'),
+        player_data.get('contactEmail'),
+    ]
+    cleaned = []
+    for value in values:
+        email = _normalise_public_email(value)
+        if email and email not in cleaned:
+            cleaned.append(email)
+    return cleaned
+
+def _find_player_by_email(db, email_lower):
+    for snap in db.collection('players').stream():
+        data = snap.to_dict() or {}
+        if email_lower in _player_email_candidates(data):
+            return str(snap.id), data.get('name')
+    return None, None
+
+def _poll_normalise_id(value):
+    return re.sub(r'[^a-z0-9]+', '-', str(value or '').lower()).strip('-')
+
+def _poll_questions(poll):
+    raw_questions = poll.get('questions') if isinstance(poll.get('questions'), list) else []
+    if raw_questions:
+        questions = []
+        for index, question in enumerate(raw_questions):
+            q_type = question.get('type') if question.get('type') in ('single_choice', 'multi_choice', 'short_text') else 'single_choice'
+            options = []
+            if q_type != 'short_text':
+                for option_index, option in enumerate(question.get('options') or []):
+                    if not isinstance(option, dict):
+                        continue
+                    label = str(option.get('label') or '').strip()
+                    if label:
+                        options.append({
+                            'id': str(option.get('id') or f'option-{option_index + 1}'),
+                            'label': label,
+                        })
+            show_if = question.get('showIf') if isinstance(question.get('showIf'), dict) else None
+            questions.append({
+                'id': str(question.get('id') or f'q-{index + 1}'),
+                'text': str(question.get('text') or '').strip(),
+                'type': q_type,
+                'required': question.get('required') is not False,
+                'options': options,
+                'showIf': {
+                    'questionId': str(show_if.get('questionId')),
+                    'value': str(show_if.get('value')),
+                } if show_if and show_if.get('questionId') and show_if.get('value') else None,
+            })
+        return [question for question in questions if question['text']]
+
+    options = []
+    for index, option in enumerate(poll.get('options') or []):
+        if not isinstance(option, dict):
+            continue
+        label = str(option.get('label') or '').strip()
+        if label:
+            options.append({
+                'id': str(option.get('id') or f'option-{index + 1}'),
+                'label': label,
+            })
+    if poll.get('question') and options:
+        return [{
+            'id': 'main',
+            'text': str(poll.get('question')).strip(),
+            'type': 'single_choice',
+            'required': True,
+            'options': options,
+            'showIf': None,
+        }]
+    return []
+
+def _poll_answer_matches(answer, expected):
+    if isinstance(answer, list):
+        return str(expected) in [str(value) for value in answer]
+    return str(answer or '') == str(expected)
+
+def _poll_visible_questions(questions, answers):
+    visible = []
+    for question in questions:
+        show_if = question.get('showIf')
+        if show_if and not _poll_answer_matches(answers.get(show_if.get('questionId')), show_if.get('value')):
+            continue
+        visible.append(question)
+    return visible
+
+def _clean_poll_answers(questions, answers):
+    answers = answers if isinstance(answers, dict) else {}
+    visible = _poll_visible_questions(questions, answers)
+    cleaned = {}
+    for question in visible:
+        qid = question['id']
+        value = answers.get(qid)
+        if question.get('required') and (value is None or value == '' or value == []):
+            return None, f"Answer required: {question['text']}"
+        if value is None or value == '' or value == []:
+            continue
+        if question['type'] == 'short_text':
+            cleaned[qid] = str(value).strip()[:300]
+            continue
+        allowed = {str(option['id']) for option in question.get('options') or []}
+        if question['type'] == 'multi_choice':
+            if not isinstance(value, list):
+                return None, f"Invalid answer: {question['text']}"
+            selected = [str(item) for item in value if str(item) in allowed]
+            if question.get('required') and not selected:
+                return None, f"Answer required: {question['text']}"
+            cleaned[qid] = selected
+            continue
+        value = str(value)
+        if value not in allowed:
+            return None, f"Invalid answer: {question['text']}"
+        cleaned[qid] = value
+    return cleaned, ''
+
+def _poll_player_candidates(db, team_id):
+    players = []
+    for snap in db.collection('players').stream():
+        data = snap.to_dict() or {}
+        games = data.get('gamesPlayed2026') or {}
+        if data.get('assignedTeam2026') == team_id or (isinstance(games, dict) and int(games.get(team_id) or 0) > 0):
+            players.append({'id': str(snap.id), **data})
+    return players
+
+def _poll_target_players(db, poll):
+    target_players = poll.get('targetPlayers') if isinstance(poll.get('targetPlayers'), list) else []
+    if target_players:
+        return [
+            {**player, 'id': str(player.get('id'))}
+            for player in target_players
+            if player.get('id') and player.get('name')
+        ]
+
+    if poll.get('targetType') == 'all_active':
+        players = []
+        for snap in db.collection('players').stream():
+            data = snap.to_dict() or {}
+            if data.get('isActive') is not False:
+                players.append({'id': str(snap.id), **data})
+        return players
+
+    team_ids = poll.get('targetTeamIds') if isinstance(poll.get('targetTeamIds'), list) else []
+    if not team_ids and poll.get('teamId'):
+        team_ids = [poll.get('teamId')]
+
+    by_id = {}
+    for team_id in team_ids:
+        for player in _poll_player_candidates(db, str(team_id)):
+            by_id[str(player['id'])] = player
+    return list(by_id.values())
+
+def _poll_match_player(db, poll, name):
+    import difflib
+
+    lookup = _public_normalise_name(name)
+    if not lookup:
+        return None
+    player_map = {
+        _public_normalise_name(player.get('name')): player
+        for player in _poll_target_players(db, poll)
+        if player.get('name')
+    }
+    if lookup in player_map:
+        player = player_map[lookup]
+        return {'playerId': str(player['id']), 'playerName': player.get('name'), 'confidence': 'exact'}
+    close = difflib.get_close_matches(lookup, player_map.keys(), n=1, cutoff=0.75)
+    if close:
+        player = player_map[close[0]]
+        return {'playerId': str(player['id']), 'playerName': player.get('name'), 'confidence': 'fuzzy'}
+    return None
+
 def _public_normalise_name(value):
     return re.sub(r'[^a-z0-9]+', ' ', str(value or '').lower()).strip()
 
@@ -1813,6 +2099,101 @@ def _public_name_match(db, name):
             'confidence': 'fuzzy',
         }
     return None
+
+@https_fn.on_request(region=REGION)
+def submitPublicPollResponse(req: https_fn.Request) -> https_fn.Response:
+    """Public no-login poll submit endpoint. One response per matched player/name."""
+    if req.method == 'OPTIONS':
+        return https_fn.Response('', status=204, headers=_public_poll_cors())
+    if req.method != 'POST':
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': 'POST required'}),
+            status=405, mimetype='application/json', headers=_public_poll_cors()
+        )
+
+    body = req.get_json(silent=True) or {}
+    poll_id = str(body.get('poll_id') or '').strip()
+    name = str(body.get('name') or '').strip()
+    email = _normalise_public_email(body.get('email')) if body.get('email') else ''
+    answers = body.get('answers') if isinstance(body.get('answers'), dict) else {}
+    option_id = str(body.get('option_id') or '').strip()
+
+    if not poll_id:
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': 'Poll not found.'}),
+            status=400, mimetype='application/json', headers=_public_poll_cors()
+        )
+    if len(name) < 2 or len(name) > 80:
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': 'Enter your name.'}),
+            status=400, mimetype='application/json', headers=_public_poll_cors()
+        )
+    if email and not _valid_public_email(email):
+        email = ''
+
+    db = _get_db()
+    poll_ref = db.collection('polls').document(poll_id)
+    poll_snap = poll_ref.get()
+    if not poll_snap.exists:
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': 'Poll not found.'}),
+            status=404, mimetype='application/json', headers=_public_poll_cors()
+        )
+
+    poll = poll_snap.to_dict() or {}
+    if poll.get('isOpen') is not True:
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': 'This poll is closed.'}),
+            status=400, mimetype='application/json', headers=_public_poll_cors()
+        )
+
+    questions = _poll_questions(poll)
+    if not questions:
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': 'Poll has no questions.'}),
+            status=400, mimetype='application/json', headers=_public_poll_cors()
+        )
+
+    if option_id and not answers:
+        answers = {questions[0]['id']: option_id}
+
+    cleaned_answers, validation_error = _clean_poll_answers(questions, answers)
+    if validation_error:
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': validation_error}),
+            status=400, mimetype='application/json', headers=_public_poll_cors()
+        )
+
+    name_key = _public_normalise_name(name)
+    match = _poll_match_player(db, poll, name)
+    response_id = f"player_{match['playerId']}" if match else f"name_{_public_email_doc_id(name_key)}"
+    response_ref = poll_ref.collection('responses').document(response_id)
+    payload = {
+        'name': name,
+        'nameKey': name_key,
+        'email': email or None,
+        'emailLower': email or None,
+        'answers': cleaned_answers,
+        'optionId': cleaned_answers.get(questions[0]['id']) if questions and questions[0]['type'] == 'single_choice' else None,
+        'submittedAt': datetime.utcnow().isoformat(),
+        'playerId': match.get('playerId') if match else None,
+        'playerName': match.get('playerName') if match else None,
+        'matchConfidence': match.get('confidence') if match else None,
+        'status': 'active',
+    }
+
+    try:
+        response_ref.create(payload)
+    except AlreadyExists:
+        return https_fn.Response(
+            json.dumps({'ok': False, 'error': 'This player/name has already responded to this poll.'}),
+            status=409, mimetype='application/json', headers=_public_poll_cors()
+        )
+
+    return https_fn.Response(
+        json.dumps({'ok': True, 'id': response_ref.id}),
+        status=200, mimetype='application/json', headers=_public_poll_cors()
+    )
 
 def _public_round_payload(db, round_id):
     snap = db.collection('rounds').document(str(round_id)).get()
@@ -2294,6 +2675,7 @@ def autoSyncUnavailability(req: https_fn.Request) -> https_fn.Response:
     written = 0
     seen_by_round = {}
 
+    pickups = 0
     for m in matched:
         round_doc = _get_round_for_date(db, m['date'])
         if not round_doc:
@@ -2302,20 +2684,39 @@ def autoSyncUnavailability(req: https_fn.Request) -> https_fn.Response:
         round_id  = round_doc['id']
         player_id = str(m['player']['id'])
 
-        doc_ref = db.collection('playerUnavailability').document(f'{round_id}_{player_id}')
-        batch.set(doc_ref, {
-            'playerId':   player_id,
-            'roundId':    round_id,
-            'days':       m['day'],
-            'source':     'auto_sync',
-            'syncedAt':   datetime.utcnow().isoformat(),
-        }, merge=True)
-
-        # Track seen names per round so manual sync knows what's new
         if round_id not in seen_by_round:
             seen_by_round[round_id] = set(_get_seen_names(db, round_id))
-        seen_by_round[round_id].add(m['sheet_name'])
-        written += 1
+        seen = seen_by_round[round_id]
+
+        doc_ref = db.collection('playerUnavailability').document(f'{round_id}_{player_id}')
+        existing = doc_ref.get()
+        existing_data = existing.to_dict() if existing.exists else None
+        event_type = _unavail_pickup_event(existing_data, m['sheet_name'], seen, m['day'])
+
+        if event_type:
+            batch.set(doc_ref, {
+                'playerId':   player_id,
+                'roundId':    round_id,
+                'days':       m['day'],
+                'source':     'auto_sync',
+                'syncedAt':   datetime.utcnow().isoformat() + 'Z',
+                'sheetName':  m['sheet_name'],
+            }, merge=True)
+            _append_unavail_sync_log(
+                batch, db,
+                player_id=player_id,
+                player_name=m['player'].get('name', ''),
+                sheet_name=m['sheet_name'],
+                round_id=round_id,
+                round_label=_round_label(round_doc),
+                days=m['day'],
+                source='auto_sync',
+                event_type=event_type,
+            )
+            written += 1
+            pickups += 1
+
+        seen.add(m['sheet_name'])
 
     for round_id, names in seen_by_round.items():
         sync_ref = db.collection('unavailabilitySyncs').document(round_id)
@@ -2357,10 +2758,11 @@ def autoSyncUnavailability(req: https_fn.Request) -> https_fn.Response:
 
     return https_fn.Response(
         json.dumps({
-            'ok':       True,
-            'written':  written,
+            'ok':        True,
+            'written':   written,
+            'pickups':   pickups,
             'unmatched': len(unmatched),
-            'ignored':  len(ignored),
+            'ignored':   len(ignored),
         }),
         status=200, mimetype='application/json', headers=cors_headers
     )
@@ -2468,29 +2870,56 @@ def confirmUnavailabilitySync(req: https_fn.Request) -> https_fn.Response:
     entries = body.get('entries', [])
     new_aliases = body.get('aliases', {})
     db = _get_db()
+    players_by_id = {str(d.id): d.to_dict() for d in db.collection('players').stream()}
+    rounds_cache = {}
     batch = db.batch()
     written = 0
     seen_by_round = {}  # round_id → set of sheet_names
+
+    def _round_label_for_id(round_id):
+        if round_id not in rounds_cache:
+            doc = db.collection('rounds').document(round_id).get()
+            rounds_cache[round_id] = _round_label(doc.to_dict()) if doc.exists else None
+        return rounds_cache[round_id]
 
     for e in entries:
         player_id = str(e['player_id'])
         round_id  = str(e['round_id'])
         day       = e['day']           # 'sat', 'sun', 'both'
         sheet_name = e.get('sheet_name', '')
+        player_name = e.get('player_name') or players_by_id.get(player_id, {}).get('name', '')
+        round_label = e.get('round_label') or _round_label_for_id(round_id)
 
         # Write to playerUnavailability — doc id = {round_id}_{player_id}
         doc_ref = db.collection('playerUnavailability').document(f'{round_id}_{player_id}')
+        existing = doc_ref.get()
+        existing_data = existing.to_dict() if existing.exists else None
+        if round_id not in seen_by_round:
+            seen_by_round[round_id] = set(_get_seen_names(db, round_id))
+        event_type = _unavail_pickup_event(existing_data, sheet_name, seen_by_round[round_id], day)
+        if not event_type:
+            event_type = 'new'
+
         batch.set(doc_ref, {
             'playerId': player_id,
             'roundId': round_id,
             'days': day,
             'source': 'sheet_sync',
-            'syncedAt': datetime.utcnow().isoformat(),
+            'syncedAt': datetime.utcnow().isoformat() + 'Z',
+            'sheetName': sheet_name or None,
         }, merge=True)
+        _append_unavail_sync_log(
+            batch, db,
+            player_id=player_id,
+            player_name=player_name,
+            sheet_name=sheet_name,
+            round_id=round_id,
+            round_label=round_label or None,
+            days=day,
+            source='sheet_sync',
+            event_type=event_type,
+        )
 
-        # Track seen names per round
-        if round_id not in seen_by_round:
-            seen_by_round[round_id] = set(_get_seen_names(db, round_id))
         seen_by_round[round_id].add(sheet_name)
         written += 1
 

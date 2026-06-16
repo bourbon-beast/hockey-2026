@@ -12,9 +12,20 @@ function allowedUserRef(email) {
 export async function getAllowedUser(email) {
   const normalized = normaliseEmail(email)
   if (!normalized) return null
-  const snap = await getDoc(allowedUserRef(normalized))
-  if (!snap.exists()) return null
-  return { id: snap.id, ...snap.data(), email: snap.data().email || snap.id }
+  // Retry transient read failures (network blip, cold Firestore) so a one-off
+  // error doesn't bounce an allowed user to the login screen.
+  let lastErr
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const snap = await getDoc(allowedUserRef(normalized))
+      if (!snap.exists()) return null
+      return { id: snap.id, ...snap.data(), email: snap.data().email || snap.id }
+    } catch (e) {
+      lastErr = e
+      if (attempt < 3) await new Promise(r => setTimeout(r, 400 * attempt))
+    }
+  }
+  throw lastErr
 }
 
 export async function listAllowedUsers() {

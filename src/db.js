@@ -17,6 +17,26 @@ export async function getTeams() {
     .map(t => ({ id: t.id, name: t.name, sort_order: t.sortOrder }))
 }
 
+// HV eligibility config — team grade rankings (1 = highest) + season length.
+// Seeded by scripts/seed_team_rankings.py; falls back to the 2026 defaults so
+// the Planner still validates if the doc is missing.
+export const DEFAULT_TEAM_RANKINGS = {
+  rankings: { PL: 1, PLR: 2, PB: 3, PC: 4, PE: 5, Metro: 6 },
+  roundsInSeason: 18,
+  season: 2026,
+}
+
+export async function getTeamRankings() {
+  const snap = await getDoc(doc(db, 'config', 'teamRankings'))
+  if (!snap.exists()) return DEFAULT_TEAM_RANKINGS
+  const data = snap.data()
+  return {
+    rankings: data.rankings || DEFAULT_TEAM_RANKINGS.rankings,
+    roundsInSeason: data.roundsInSeason || DEFAULT_TEAM_RANKINGS.roundsInSeason,
+    season: data.season || DEFAULT_TEAM_RANKINGS.season,
+  }
+}
+
 export async function getStatuses() {
   const snap = await getDoc(doc(db, 'config', 'statuses'))
   if (!snap.exists()) return []
@@ -46,9 +66,11 @@ export async function getPlayers(includeInactive = false) {
       is_new_registration: data.isNewRegistration ? 1 : 0,
       is_international: data.isInternational ? 1 : 0,
       needs_visa: data.needsVisa ? 1 : 0,
+      is_not_financial: data.isNotFinancial ? 1 : 0,
       player_type: data.playerType || null,
       interested_in: data.interestedIn || null,
       previous_club: data.previousClub || null,
+      email: data.email || data.emailAddress || data.contactEmail || null,
       follow_up_ok: data.followUpOk ?? null,
       unsure_reason: data.unsureReason || null,
       playing_preference: data.playingPreference || null,
@@ -56,6 +78,7 @@ export async function getPlayers(includeInactive = false) {
       games_played_2026: data.gamesPlayed2026 || {},
       total_games_2026:  data.totalGames2026 || 0,
       stats_2026:        data.stats2026 || null,
+      stats_2026_by_team: data.stats2026ByTeam || {},
     }
   })
   if (!includeInactive) players = players.filter(p => p.is_active === 1)
@@ -79,9 +102,11 @@ export async function getPlayer(playerId) {
     is_new_registration: data.isNewRegistration ? 1 : 0,
     is_international: data.isInternational ? 1 : 0,
     needs_visa: data.needsVisa ? 1 : 0,
+    is_not_financial: data.isNotFinancial ? 1 : 0,
     player_type: data.playerType || null,
     interested_in: data.interestedIn || null,
     previous_club: data.previousClub || null,
+    email: data.email || data.emailAddress || data.contactEmail || null,
     follow_up_ok: data.followUpOk ?? null,
     unsure_reason: data.unsureReason || null,
     playing_preference: data.playingPreference || null,
@@ -89,6 +114,7 @@ export async function getPlayer(playerId) {
     games_played_2026: data.gamesPlayed2026 || {},
     total_games_2026:  data.totalGames2026 || 0,
     stats_2026:        data.stats2026 || null,
+    stats_2026_by_team: data.stats2026ByTeam || {},
     history: [],
   }
 }
@@ -112,6 +138,7 @@ export async function createPlayer(data) {
     isNewRegistration: true,
     isInternational: false,
     needsVisa: false,
+    isNotFinancial: false,
     playerType: null,
     interestedIn: null,
     previousClub: null,
@@ -176,6 +203,7 @@ export async function updatePlayer(playerId, data) {
   if (data.is_new_registration !== undefined)   updates.isNewRegistration = !!data.is_new_registration
   if (data.is_international !== undefined)      updates.isInternational = !!data.is_international
   if (data.needs_visa !== undefined)            updates.needsVisa = !!data.needs_visa
+  if (data.is_not_financial !== undefined)      updates.isNotFinancial = !!data.is_not_financial
   if (data.player_type !== undefined)           updates.playerType = data.player_type || null
   if (data.interested_in !== undefined)         updates.interestedIn = data.interested_in || null
   if (data.previous_club !== undefined)         updates.previousClub = data.previous_club || null
@@ -274,8 +302,10 @@ export async function getRoundDetail(roundId, allPlayers = null) {
       status_id: null,
       primary_team_id_2025: player.primaryTeam2025 || null,
       default_position: player.defaultPosition || null,
+      is_not_financial: (player.isNotFinancial || player.is_not_financial === 1) ? 1 : 0,
       // Round-scoped note stored on the selection doc itself
       note: sel.note || null,
+      eligibility_tag: sel.eligibilityTag || null,
     }
   }).sort((a, b) => {
     if (a.team_id !== b.team_id) return a.team_id.localeCompare(b.team_id)
@@ -529,6 +559,14 @@ export async function updateSelectionNote(roundId, selectionId, note) {
   })
 }
 
+// HV eligibility tag for a double-up selection: null | 'ETS' | 'DGK' | 'EXEMPT'
+// Forward-looking intent for the current round only (ELIGIBILITY-ENGINE.md §1)
+export async function updateSelectionEligibilityTag(roundId, selectionId, tag) {
+  await updateDoc(doc(db, 'rounds', String(roundId), 'selections', selectionId), {
+    eligibilityTag: tag || null,
+  })
+}
+
 // Drag-and-drop: move player between teams or reorder within team
 export async function moveSelection(roundId, { playerId, from_team_id, target_team_id, target_player_id, insert_after }) {
   const selsSnap = await getDocs(collection(db, 'rounds', String(roundId), 'selections'))
@@ -759,6 +797,13 @@ export async function getRoundMatches(roundId) {
 // Returns the most recent HV sync digest from Firestore.
 export async function getHvSync() {
   const snap = await getDoc(doc(db, 'hvSync', 'latest'))
+  if (!snap.exists()) return null
+  return snap.data()
+}
+
+// Returns the latest full HV ladder sync from Firestore.
+export async function getHvLadders() {
+  const snap = await getDoc(doc(db, 'hvSync', 'ladders'))
   if (!snap.exists()) return null
   return snap.data()
 }

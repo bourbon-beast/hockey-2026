@@ -13,6 +13,7 @@ export function useRoundManager() {
     const [roundData, setRoundData] = useState(null)
     const [loading, setLoading] = useState(true)
     const [roundUnavailability, setRoundUnavailability] = useState({})
+    const [teamRankings, setTeamRankings] = useState(DB.DEFAULT_TEAM_RANKINGS)
 
     // Drag State
     const [draggedPlayer, setDraggedPlayer] = useState(null)
@@ -31,11 +32,13 @@ export function useRoundManager() {
         Promise.all([
             DB.getTeams(),
             DB.getPlayers(true),
-            DB.getRounds()
-        ]).then(([teamsData, playersData, roundsData]) => {
+            DB.getRounds(),
+            DB.getTeamRankings()
+        ]).then(([teamsData, playersData, roundsData, rankingsData]) => {
             setTeams(teamsData.filter(t => t.id !== 'NEW'))
             setAllPlayers(playersData)
             setRounds(roundsData)
+            setTeamRankings(rankingsData)
             const today = new Date().toISOString().split('T')[0]
             const season = roundsData.filter(r => r.round_type === 'season')
             const upcoming = season.find(r => r.round_date && r.round_date >= today)
@@ -100,10 +103,12 @@ export function useRoundManager() {
                     confirmed: sel.confirmed ? (sel.confirmed === true ? 2 : sel.confirmed) : 0,
                     is_unavailable: sel.isUnavailable ? 1 : 0,
                     note: sel.note || null,
+                    eligibility_tag: sel.eligibilityTag || null,
                     name: player.name || 'Unknown',
                     status_id: null,
                     primary_team_id_2025: player.primaryTeam2025 || null,
                     default_position: player.defaultPosition || null,
+                    is_not_financial: player.is_not_financial || 0,
                 }
             }).sort((a, b) => {
                 if (a.team_id !== b.team_id) return a.team_id.localeCompare(b.team_id)
@@ -203,6 +208,7 @@ export function useRoundManager() {
                 player_id: entry.player_id, slot_number: entry.slot_number, position: null,
                 confirmed: 0, is_unavailable: 0, name: player.name,
                 default_position: player.default_position || null, status_id: null,
+                is_not_financial: player.is_not_financial || 0,
             }))
             return { ...prev, selections: [...prev.selections, ...newSels] }
         })
@@ -284,6 +290,7 @@ export function useRoundManager() {
                         name: created.name,
                         status_id: null,
                         default_position: null,
+                        is_not_financial: 0,
                     },
                 ],
             }
@@ -356,6 +363,16 @@ export function useRoundManager() {
             selections: prev.selections.map(s => s.id === selectionId ? { ...s, note } : s)
         }))
         await DB.updateSelectionNote(currentRound.id, selectionId, note)
+    }
+
+    // HV eligibility tag (null | 'ETS' | 'DGK' | 'EXEMPT') — optimistic like notes
+    const updateEligibilityTag = async (selectionId, tag) => {
+        if (!currentRound) return
+        setRoundData(prev => ({
+            ...prev,
+            selections: prev.selections.map(s => s.id === selectionId ? { ...s, eligibility_tag: tag || null } : s)
+        }))
+        await DB.updateSelectionEligibilityTag(currentRound.id, selectionId, tag)
     }
 
     // ── Drag & Drop Handlers ──
@@ -690,13 +707,13 @@ export function useRoundManager() {
     return {
         state: {
             teams, allPlayers, rounds, currentRound, roundData, loading, roundUnavailability,
-            draggedPlayer, dragOverInfo, seasonRounds, practiceRounds
+            teamRankings, draggedPlayer, dragOverInfo, seasonRounds, practiceRounds
         },
         actions: {
             setCurrentRound, createRound, deleteRound, updateRound, carryForward, updateMatchDetails,
             addPlayers, removePlayer, markSelectionUnavailable, toggleConfirmed, updatePosition,
             createAndAddPlayer,
-            updateNote,
+            updateNote, updateEligibilityTag,
             handleDragStart, handleDragOverRow, handleDragOverEmpty, handleDragOverColumn,
             handleDropToBucket, handleDrop, handleDragEnd, handleTouchStart, handleTouchMove, handleTouchEnd,
             moveSelectionByIndex

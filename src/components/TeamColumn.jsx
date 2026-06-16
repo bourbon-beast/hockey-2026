@@ -76,8 +76,90 @@ function NotePopover({ sel, anchorRef, onSave, onClose }) {
     )
 }
 
+// ── Eligibility Tag Popover ──────────────────────────────────────────────────
+// Opened from the eligibility (DU) badge — sets the HV tag on the selection
+// and lists the validation reasons with reg references. Mirrors NotePopover.
+const ELIGIBILITY_TAG_OPTIONS = [
+    { value: null,     label: 'None',   desc: 'Ordinary double-up (Reg 8.1/8.4.3)' },
+    { value: 'ETS',    label: 'ETS',    desc: 'Elite Team Substitute — excluded from record (Reg 8.3.2)' },
+    { value: 'DGK',    label: 'DGK',    desc: 'Goalkeeper match of a GK double-up (Reg 8.3.3)' },
+    { value: 'EXEMPT', label: 'Exempt', desc: 'Uses one of 3 team exemption slots (Reg 8.4.4)' },
+]
+
+function EligibilityPopover({ sel, result, anchorRef, onSave, onClose }) {
+    const [pos, setPos] = useState({ top: 0, left: 0 })
+    const popoverRef = useRef(null)
+
+    useEffect(() => {
+        if (anchorRef?.current) {
+            const rect = anchorRef.current.getBoundingClientRect()
+            const popW = 288
+            const vw = window.innerWidth
+            let left = rect.left
+            if (left + popW > vw - 8) left = vw - popW - 8
+            if (left < 8) left = 8
+            setPos({ top: rect.bottom + 4, left })
+        }
+    }, [anchorRef])
+
+    useEffect(() => {
+        const handler = (e) => {
+            if (
+                popoverRef.current && !popoverRef.current.contains(e.target) &&
+                anchorRef?.current && !anchorRef.current.contains(e.target)
+            ) onClose()
+        }
+        document.addEventListener('mousedown', handler)
+        return () => document.removeEventListener('mousedown', handler)
+    }, [onClose, anchorRef])
+
+    const reasons = result?.reasons || []
+
+    return (
+        <div ref={popoverRef}
+            className="fixed z-50 bg-white border border-slate-200 rounded-lg shadow-xl p-3 w-72"
+            style={{ top: pos.top, left: pos.left }}
+            onMouseDown={e => e.stopPropagation()}>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">HV eligibility tag</p>
+            <div className="space-y-1">
+                {ELIGIBILITY_TAG_OPTIONS.map(opt => {
+                    const active = (sel.eligibility_tag || null) === opt.value
+                    return (
+                        <button key={opt.label}
+                            onClick={() => { onSave(opt.value); onClose() }}
+                            className={`w-full text-left rounded px-2 py-1.5 border transition-colors ${
+                                active
+                                    ? 'border-blue-400 bg-blue-50'
+                                    : 'border-slate-100 hover:border-slate-300 hover:bg-slate-50'
+                            }`}>
+                            <span className="text-xs font-bold text-slate-700">{opt.label}</span>
+                            <span className="block text-[11px] text-slate-500 leading-tight">{opt.desc}</span>
+                        </button>
+                    )
+                })}
+            </div>
+            {reasons.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-slate-100 space-y-1">
+                    {reasons.map((r, i) => (
+                        <p key={i} className={`text-[11px] leading-tight ${r.level === 'breach' ? 'text-red-600' : 'text-amber-600'}`}>
+                            {r.level === 'breach' ? '✕' : '⚠'} {r.message} ({r.regRef})
+                        </p>
+                    ))}
+                </div>
+            )}
+        </div>
+    )
+}
+
+// Badge styling per validation status — warn, never block
+const ELIGIBILITY_BADGE_STYLES = {
+    breach:  'bg-red-100 text-red-700 ring-1 ring-red-400',
+    warning: 'bg-amber-100 text-amber-700 ring-1 ring-amber-400',
+    ok:      'bg-orange-100 text-orange-600',
+}
+
 export default function TeamColumn({
-    team, state, actions, getters, duplicateIds, onSelectPlayer, setPickerOpen, onCreateVoteLink
+    team, state, actions, getters, duplicateIds, eligibilityResults, onSelectPlayer, setPickerOpen, onCreateVoteLink
 }) {
     const { allPlayers, roundUnavailability, draggedPlayer, dragOverInfo, currentRound } = state
 
@@ -96,8 +178,11 @@ export default function TeamColumn({
     }
     const [sortMode, setSortMode] = useState(false)
     const [noteOpenId, setNoteOpenId] = useState(null) // selectionId of open popover
+    const [eligOpenId, setEligOpenId] = useState(null) // selectionId of open eligibility popover
 
     const selections  = getters.getTeamActiveSelections(team.id)
+    // Reg 8.4.4 — exemption slots in use this round for this team
+    const exemptCount = selections.filter(s => s.eligibility_tag === 'EXEMPT').length
     const unavailSels = getters.getTeamUnavailableSelections(team.id)
     const match       = getters.getMatchDetails(team.id)
     const counts      = getters.getTeamCounts(team.id)
@@ -171,7 +256,18 @@ export default function TeamColumn({
             >
                 <div style={{ background: 'linear-gradient(90deg, #eab308 0%, #facc15 65%, rgba(250,204,21,0.35) 100%)', height: '4px' }} />
                 <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
-                    <div className="font-bold text-sm tracking-wide">{team.id}</div>
+                    <div className="flex items-center gap-2 min-w-0">
+                        <div className="font-bold text-sm tracking-wide">{team.id}</div>
+                        {exemptCount > 0 && (
+                            <span
+                                title="Reg 8.4.4 exemption slots used this round"
+                                className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                                    exemptCount > 3 ? 'bg-red-500/80 text-white' : 'bg-white/15 text-amber-200'
+                                }`}>
+                                Exemptions: {exemptCount}/3
+                            </span>
+                        )}
+                    </div>
                     <div className="flex items-center gap-2">
                         <div className="flex items-center gap-1.5 text-xs">
                             {counts.confirmed > 0 && <span className="text-green-300 font-medium">{counts.confirmed}✓</span>}
@@ -308,6 +404,11 @@ export default function TeamColumn({
                     const isDupe    = duplicateIds.has(sel.player_id)
                     const isDragOver = dragOverInfo?.teamId === team.id && dragOverInfo?.playerId === sel.player_id
                     const posStyle  = sel.position ? POSITION_STYLES[sel.position] : null
+                    const eligResult = eligibilityResults?.get(sel.id)
+                    const showEligBadge = isDupe || !!sel.eligibility_tag
+                    const eligTooltip = eligResult?.reasons?.length
+                        ? eligResult.reasons.map(r => `${r.message} (${r.regRef})`).join('\n')
+                        : 'Double-up — click to set HV tag (ETS / DGK / Exempt)'
 
                     return (
                         <div
@@ -370,6 +471,9 @@ export default function TeamColumn({
                                     <span className="cursor-pointer hover:text-blue-600 leading-tight"
                                         onClick={() => onSelectPlayer && onSelectPlayer(allPlayers.find(p => p.id === sel.player_id) || { id: sel.player_id, name: sel.name })}>
                                         {sel.name}
+                                        {allPlayers.find(p => p.id === sel.player_id)?.is_not_financial === 1 && (
+                                            <sup className="text-[10px] font-bold text-amber-500 ml-0.5 align-super" title="Not financial">$</sup>
+                                        )}
                                     </span>
                                     {(() => {
                                         const dot = getAvailDot(sel.player_id)
@@ -377,7 +481,34 @@ export default function TeamColumn({
                                         const tip = dot === 'red' ? 'Unavailable this day' : dot === 'purple' ? 'Available this day (unavailable other day)' : 'Available'
                                         return <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cls}`} title={tip} />
                                     })()}
-                                    {isDupe && <span className="text-xs bg-orange-100 text-orange-600 px-1 rounded font-bold flex-shrink-0">DU</span>}
+                                    {showEligBadge && (
+                                        <div className="relative flex-shrink-0">
+                                            <button
+                                                data-elig-btn={sel.id}
+                                                onClick={() => setEligOpenId(eligOpenId === sel.id ? null : sel.id)}
+                                                title={eligTooltip}
+                                                className={`text-xs px-1 rounded font-bold cursor-pointer ${
+                                                    ELIGIBILITY_BADGE_STYLES[eligResult?.status || 'ok']
+                                                }`}>
+                                                {sel.eligibility_tag === 'EXEMPT' ? 'EX' : (sel.eligibility_tag || 'DU')}
+                                            </button>
+                                            {eligOpenId === sel.id && (
+                                                <EligibilityPopover
+                                                    sel={sel}
+                                                    result={eligResult}
+                                                    anchorRef={{ current: document.querySelector(`[data-elig-btn="${sel.id}"]`) }}
+                                                    onSave={(tag) => actions.updateEligibilityTag(sel.id, tag)}
+                                                    onClose={() => setEligOpenId(null)}
+                                                />
+                                            )}
+                                        </div>
+                                    )}
+                                    {!showEligBadge && eligResult?.status === 'warning' && (
+                                        <span
+                                            className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0"
+                                            title={eligTooltip}
+                                        />
+                                    )}
                                     {/* Note icon — elevated badge style when note exists */}
                                     <div className="relative flex-shrink-0">
                                         <button
@@ -472,6 +603,9 @@ export default function TeamColumn({
                             <span className="truncate text-red-400 text-xs cursor-pointer hover:text-blue-500"
                                 onClick={() => onSelectPlayer && onSelectPlayer(allPlayers.find(p => p.id === sel.player_id) || { id: sel.player_id, name: sel.name })}>
                                 {sel.name}
+                                {allPlayers.find(p => p.id === sel.player_id)?.is_not_financial === 1 && (
+                                    <sup className="text-[10px] font-bold text-amber-500 ml-0.5 align-super" title="Not financial">$</sup>
+                                )}
                             </span>
                         </div>
                         <button onClick={() => actions.markSelectionUnavailable(team.id, sel.player_id, false)}

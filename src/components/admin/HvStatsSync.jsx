@@ -1,9 +1,9 @@
 // src/components/admin/HvStatsSync.jsx
 // HV Sync admin panel — master sync + individual parts, unmatched names, aliases, review
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { auth, db } from '../../firebase'
-import { doc, updateDoc, deleteField, getDoc } from 'firebase/firestore'
+import { doc, updateDoc, deleteField, getDoc, onSnapshot } from 'firebase/firestore'
 import { getPlayers, getHvNameAliases, getHvUnmatchedNames, getRounds, saveHvAlias, resolveHvUnmatchedName, createPlayer, clearStatsLastSyncForHvName } from '../../db'
 import { RefreshCw, ChevronDown, ChevronUp, Trash2, Check, Eye, Zap } from 'lucide-react'
 
@@ -35,6 +35,57 @@ export default function HvStatsSync() {
   // Individual sync states
   const [ladderPhase, setLadderPhase]           = useState('idle')
   const [playerStatsPhase, setPlayerStatsPhase] = useState('idle')
+  // syncHv completion baseline — the hvSync/latest.syncedAt at sync start.
+  // A long syncHv fetch can't survive this panel unmounting (navigating tabs),
+  // so completion is also watched off Firestore so the spinner can't strand.
+  const [syncBaseline, setSyncBaseline] = useState(() => loadSyncState().syncBaseline || null)
+  const watcherRef = useRef(null)   // { unsub, timer } for the active completion watcher
+
+  const stopWatcher = () => {
+    if (watcherRef.current) {
+      watcherRef.current.unsub?.()
+      clearTimeout(watcherRef.current.timer)
+      watcherRef.current = null
+    }
+  }
+
+  // Watch hvSync/latest; when syncedAt advances past the baseline the run is
+  // done, even if the original fetch promise was lost to a tab switch. Falls
+  // back to clearing the spinner after a generous timeout.
+  const startCompletionWatcher = (baseline) => {
+    stopWatcher()
+    const unsub = onSnapshot(doc(db, 'hvSync', 'latest'), (snap) => {
+      const syncedAt = snap.data()?.syncedAt
+      if (syncedAt && syncedAt !== baseline) {
+        setPhase(p => (p === 'running' ? 'done' : p))
+        stopWatcher()
+      }
+    })
+    const timer = setTimeout(() => {
+      setPhase(p => (p === 'running' ? 'idle' : p))
+      setLog(l => [...l, 'Sync finished or still running — check the Digest tab.'])
+      stopWatcher()
+    }, 7 * 60 * 1000)
+    watcherRef.current = { unsub, timer }
+  }
+
+  // Capture the current syncedAt baseline and arm the watcher before a syncHv run
+  const armCompletionWatcher = async () => {
+    let baseline = null
+    try { baseline = (await getDoc(doc(db, 'hvSync', 'latest'))).data()?.syncedAt || null } catch {}
+    setSyncBaseline(baseline)
+    startCompletionWatcher(baseline)
+  }
+
+  // On mount, if a sync was left 'running' (panel was unmounted mid-run), the
+  // owning fetch is gone — reconcile completion off Firestore instead of
+  // spinning forever. Tear the watcher down on unmount; remount re-arms it.
+  useEffect(() => {
+    if (loadSyncState().phase === 'running') {
+      startCompletionWatcher(loadSyncState().syncBaseline || null)
+    }
+    return () => stopWatcher()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     getPlayers(true).then(p => setAllPlayers(p.sort((a, b) => a.name.localeCompare(b.name))))
@@ -53,10 +104,10 @@ export default function HvStatsSync() {
     })
   }, [])
 
-  // Persist phase/log/unmatched to sessionStorage whenever they change
+  // Persist phase/log/unmatched/baseline to sessionStorage whenever they change
   useEffect(() => {
-    saveSyncState({ phase, log, unmatched })
-  }, [phase, log, unmatched])
+    saveSyncState({ phase, log, unmatched, syncBaseline })
+  }, [phase, log, unmatched, syncBaseline])
 
   const loadAliases = async () => {
     setAliases(await getHvNameAliases())
@@ -65,6 +116,7 @@ export default function HvStatsSync() {
   const runSync = async () => {
     if (!SYNC_HV_URL) { setPhase('error'); setLog(['VITE_SYNC_HV_URL not configured']); return }
     setPhase('running'); setLog([]); setUnmatched([]); setSaved({}); setResolutions({})
+    await armCompletionWatcher()
     try {
       const idToken = await auth.currentUser?.getIdToken()
       const res  = await fetch(SYNC_HV_URL, {
@@ -78,17 +130,21 @@ export default function HvStatsSync() {
       setLog(rawLog)
       setUnmatched(rawUnmatched)
       setPhase(data.ok ? 'done' : 'error')
+      stopWatcher()
     } catch (e) {
-      setLog([`Network error: ${e.message}`]); setPhase('error')
+      // Leave the Firestore watcher running — the fetch may have dropped while
+      // the function completes server-side; the watcher will resolve the spinner.
+      setLog([`Network error: ${e.message} — watching for completion…`])
     }
   }
 
   // Helper: fire a single URL and return { ok, log }
-  const _callSync = async (url) => {
+  const _callSync = async (url, body) => {
     const idToken = await auth.currentUser?.getIdToken()
     const res  = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
     })
     return res.json()
   }
@@ -105,6 +161,7 @@ export default function HvStatsSync() {
       if (!ladderData.ok) { setPhase('idle'); return }
 
       // Step 2: HV sync (results, fixtures, player stats, digest — reads fresh ladder)
+      await armCompletionWatcher()
       const idToken = await auth.currentUser?.getIdToken()
       const hvRes = await fetch(SYNC_HV_URL, {
         method: 'POST',
@@ -117,17 +174,29 @@ export default function HvStatsSync() {
       setLog(rawLog)
       setUnmatched(rawUnmatched)
       setPhase(hvData.ok ? 'done' : 'error')
+      stopWatcher()
     } catch (e) {
-      setLog(l => [...l, `Network error: ${e.message}`])
-      setPhase('error'); setLadderPhase('error')
+      if (ladderPhase === 'running') setLadderPhase('error')
+      if (watcherRef.current) {
+        // HV step was in flight — its fetch may have dropped while the function
+        // completes; leave the Firestore watcher to resolve the spinner.
+        setLog(l => [...l, `Network error: ${e.message} — watching for completion…`])
+      } else {
+        // Failed before the HV step (e.g. ladder sync) — nothing to wait for.
+        setLog(l => [...l, `Network error: ${e.message}`]); setPhase('error')
+      }
     }
   }
 
-  // Individual: player stats only
-  const runPlayerStatsSync = async () => {
+  // Individual: player stats only. force = full-season re-scrape (clears
+  // statsLastSync on every match doc so GK/ETS roles backfill from HV).
+  const runPlayerStatsSync = async (force = false) => {
+    if (force && !confirm(
+      'Full re-scrape pulls every played match this season from HV (~60 pages, a few minutes). Continue?'
+    )) return
     setPlayerStatsPhase('running')
     try {
-      const data = await _callSync(SYNC_PLAYER_STATS_URL)
+      const data = await _callSync(SYNC_PLAYER_STATS_URL, force ? { forceRescrape: true } : undefined)
       setPlayerStatsPhase(data.ok ? 'done' : 'error')
     } catch (e) {
       setPlayerStatsPhase('error')
@@ -198,7 +267,8 @@ export default function HvStatsSync() {
           onMasterSync={runMasterSync}
           onRun={runSync}
           onLadderSync={runLadderSync}
-          onPlayerStatsSync={runPlayerStatsSync}
+          onPlayerStatsSync={() => runPlayerStatsSync(false)}
+          onPlayerStatsBackfill={() => runPlayerStatsSync(true)}
           ladderPhase={ladderPhase}
           playerStatsPhase={playerStatsPhase}
           onSaveAlias={handleSaveAlias}
@@ -219,7 +289,7 @@ export default function HvStatsSync() {
 
 function SyncPanel({ phase, log, unmatched, showLog, setShowLog, allPlayers, aliases,
                      resolutions, setResolutions, saving, saved,
-                     onMasterSync, onRun, onLadderSync, onPlayerStatsSync,
+                     onMasterSync, onRun, onLadderSync, onPlayerStatsSync, onPlayerStatsBackfill,
                      ladderPhase, playerStatsPhase,
                      onSaveAlias, onDeleteAlias, onReloadAliases,
                      weeklyNotes, setWeeklyNotes }) {
@@ -286,6 +356,7 @@ function SyncPanel({ phase, log, unmatched, showLog, setShowLog, allPlayers, ali
           <IndividualSyncBtn label="Results & Digest" phase={phase}     disabled={isBusy} onClick={onRun} />
           <IndividualSyncBtn label="Player Stats"     phase={playerStatsPhase} disabled={isBusy} onClick={onPlayerStatsSync} />
           <IndividualSyncBtn label="Ladder"           phase={ladderPhase}      disabled={isBusy} onClick={onLadderSync} />
+          <IndividualSyncBtn label="Full re-scrape (GK/ETS backfill)" phase={playerStatsPhase} disabled={isBusy} onClick={onPlayerStatsBackfill} />
         </div>
       </div>
 
