@@ -51,17 +51,24 @@ export function derivePlayerEligibility(player, rankings, roundsInSeason = 18) {
             (sum, [tid, n]) => (rankings[tid] != null && rankings[tid] < rank ? sum + n : sum), 0)
     }
 
-    const higherGradeGames = usuallyPlays ? higherGradeCount(usuallyPlays) : 0
-    const lockedOutBelow = higherGradeGames >= LOCKOUT_THRESHOLD
-    const approachingLockout = !lockedOutBelow && higherGradeGames >= LOCKOUT_WARNING_FROM
+    // Anti-stacking (R4) is evaluated per SELECTION against the team being
+    // dropped into — see validateRound. `establishedGames` is a player-level
+    // heads-up: field games in usuallyPlays-and-above, i.e. the count that
+    // would lock them out of the grade immediately below home. Drives the
+    // "approaching" amber dot before any drop is attempted.
+    const upRank = usuallyPlays != null ? rankings[usuallyPlays] : null
+    const establishedGames = upRank != null
+        ? Object.entries(fieldRecord).reduce(
+            (sum, [tid, n]) => (rankings[tid] != null && rankings[tid] <= upRank ? sum + n : sum), 0)
+        : 0
+    const approachingLockout = establishedGames >= LOCKOUT_WARNING_FROM && establishedGames < LOCKOUT_THRESHOLD
 
     return {
         fieldRecord,
         gkRecord,
         usuallyPlays,
         higherGradeCount,
-        higherGradeGames,
-        lockedOutBelow,
+        establishedGames,
         approachingLockout,
         roundsInSeason,
     }
@@ -214,11 +221,23 @@ export function validateRound(selections, playersById, rankings, roundsInSeason 
             const tag = s.eligibility_tag || null
             const others = sels.filter(o => o !== s)
 
-            // V4 — anti-stacking lockout (Reg 8.4.1(a))
-            if (d.lockedOutBelow && upRank != null && r != null && r > upRank &&
+            // V4 — anti-stacking lockout (Reg 8.4.1(a)). Only a DROP (team ranked
+            // below the player's home grade) can lock out — never your own grade
+            // or playing up. The count is relative to the TEAM being dropped into:
+            // field games in grades ranked above it (which includes home-grade
+            // games). EXEMPT (one-below slot) and DGK (keeper ledger) bypass it.
+            if (upRank != null && r != null && r > upRank &&
                 tag !== 'EXEMPT' && tag !== 'DGK') {
-                add(s, 'breach',
-                    `Anti-stacking lockout: ${d.higherGradeGames} higher-grade games`, 'Reg 8.4.1')
+                const upGames = d.higherGradeCount(s.team_id)
+                if (upGames >= LOCKOUT_THRESHOLD) {
+                    add(s, 'breach',
+                        `Anti-stacking: ${upGames} field games above ${s.team_id} — ineligible for ${s.team_id}`,
+                        'Reg 8.4.1')
+                } else if (upGames >= LOCKOUT_WARNING_FROM) {
+                    add(s, 'warning',
+                        `${upGames} field games above ${s.team_id} — ${LOCKOUT_THRESHOLD} locks out ${s.team_id}`,
+                        'Reg 8.4.1')
+                }
             }
 
             // V6 — EXEMPT constraints (Reg 8.4.4): exactly one grade below
@@ -252,13 +271,18 @@ export function validateRound(selections, playersById, rankings, roundsInSeason 
                     'ETS: confirm covered player is absent on State/National duties — not verifiable here',
                     'Reg 8.3.2')
             }
+        }
 
-            // V10 — approaching lockout (8–9 higher-grade games)
-            if (d.approachingLockout) {
-                add(s, 'warning',
-                    `${d.higherGradeGames} higher-grade games: ${LOCKOUT_THRESHOLD} triggers anti-stacking lockout`,
-                    'Reg 8.4.1')
-            }
+        // V10 — player-level heads-up: established at home grade and not yet
+        // dropped this round. Surfaces the amber dot before a drop is attempted;
+        // when they ARE dropped the per-selection V4 warning above covers it.
+        const hasDrop = upRank != null && sels.some(o => {
+            const rr = rankOf(o); return rr != null && rr > upRank
+        })
+        if (d.approachingLockout && !hasDrop) {
+            sels.forEach(s => add(s, 'warning',
+                `${d.establishedGames} field games at ${up}-or-above — ${LOCKOUT_THRESHOLD} locks out any drop below ${up}`,
+                'Reg 8.4.1'))
         }
     }
 

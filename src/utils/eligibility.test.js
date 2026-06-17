@@ -63,24 +63,27 @@ describe('derivation — field/GK records and Usually Plays (R8)', () => {
     })
 })
 
-describe('lockout boundary (R4 — Reg 8.4.1)', () => {
-    const withHigher = (n) => player({ PC: [12], PB: [n] }) // usuallyPlays PC, PB above
-
-    it('9 higher-grade games → approaching, not locked out', () => {
-        const d = derivePlayerEligibility(withHigher(9), RANKINGS)
-        expect(d.lockedOutBelow).toBe(false)
-        expect(d.approachingLockout).toBe(true)
+describe('lockout boundary (R4 — Reg 8.4.1, relative to target team)', () => {
+    it('higherGradeCount counts field games ranked above the GIVEN team', () => {
+        // PB regular: 8 PB field games. Relative to PC (one below), all 8 count.
+        const d = derivePlayerEligibility(player({ PB: [8] }), RANKINGS)
+        expect(d.higherGradeCount('PC')).toBe(8)   // PB is above PC
+        expect(d.higherGradeCount('PB')).toBe(0)   // own grade — nothing above counts
+        expect(d.higherGradeCount('PLR')).toBe(0)  // playing up — nothing above
     })
 
-    it('10 higher-grade games → locked out', () => {
-        const d = derivePlayerEligibility(withHigher(10), RANKINGS)
-        expect(d.lockedOutBelow).toBe(true)
-        expect(d.approachingLockout).toBe(false)
+    it('GK and ETS are excluded from the field count', () => {
+        // 9 PB appearances incl 1 GK, plus 1 PLR which is an ETS → 8 field games.
+        const d = derivePlayerEligibility(
+            player({ PB: [9, 1, 0], PLR: [1, 0, 1] }), RANKINGS)
+        expect(d.higherGradeCount('PC')).toBe(8)   // PB field 8 + PLR field 0
     })
 
-    it('7 higher-grade games → no warning', () => {
-        const d = derivePlayerEligibility(withHigher(7), RANKINGS)
-        expect(d.approachingLockout).toBe(false)
+    it('establishedGames / approachingLockout track home-grade-and-above', () => {
+        expect(derivePlayerEligibility(player({ PB: [8] }), RANKINGS).approachingLockout).toBe(true)  // 8
+        expect(derivePlayerEligibility(player({ PB: [9] }), RANKINGS).approachingLockout).toBe(true)  // 9
+        expect(derivePlayerEligibility(player({ PB: [10] }), RANKINGS).approachingLockout).toBe(false) // locked, not "approaching"
+        expect(derivePlayerEligibility(player({ PB: [7] }), RANKINGS).approachingLockout).toBe(false)  // below band
     })
 })
 
@@ -210,12 +213,43 @@ describe('validateRound', () => {
         expect(statusOf(run([belowEts, own2], p), belowEts)).toBe('breach')
     })
 
-    it('V10 — approaching lockout warns on single selections too', () => {
-        const p = { 1: player({ PC: [12], PB: [9] }) }
-        const s = sel(1, 'PC')
+    it('V4 — anti-stacking counts games above the TARGET team (O\'Brien case)', () => {
+        // PB regular, 8 field games (PB ×9 incl 1 GK; PLR ×1 is an ETS).
+        const p = { 1: player({ PB: [9, 1, 0], PLR: [1, 0, 1] }) }
+        const own = sel(1, 'PB'), drop = sel(1, 'PC')
+        const r = run([own, drop], p)
+        expect(statusOf(r, drop)).toBe('warning')          // 8 field games above PC → approaching
+        expect(r.get(drop.id).reasons[0].message).toContain('above PC')
+        expect(statusOf(r, own)).toBe('ok')                // own grade never locks out
+    })
+
+    it('V4 — 10 field games above the target team → breach; EXEMPT/DGK clear it', () => {
+        const p = { 1: player({ PB: [10] }) }              // usuallyPlays PB, 10 field
+        const drop = sel(1, 'PC')
+        expect(statusOf(run([drop], p), drop)).toBe('breach')
+        expect(reasonsOf(run([drop], p), drop)).toContain('Reg 8.4.1')
+        // EXEMPT (one grade down, one match) clears the lockout
+        const ex = sel(1, 'PC', { eligibility_tag: 'EXEMPT' })
+        expect(reasonsOf(run([ex], p), ex)).not.toContain('Reg 8.4.1')
+        // DGK (keeper ledger) clears it too
+        const gk = sel(1, 'PC', { eligibility_tag: 'DGK' }); const field = sel(1, 'PB')
+        expect(reasonsOf(run([gk, field], p), gk)).not.toContain('Reg 8.4.1')
+    })
+
+    it('V4 — never locks a player out of their own grade or playing up', () => {
+        const p = { 1: player({ PB: [10] }) }
+        const own = sel(1, 'PB')
+        expect(statusOf(run([own], p), own)).toBe('ok')      // own grade
+        const up = sel(1, 'PLR')
+        expect(statusOf(run([up], p), up)).toBe('ok')        // playing up
+    })
+
+    it('V10 — approaching-lockout heads-up on a not-yet-dropped player', () => {
+        const p = { 1: player({ PB: [8] }) }               // 8 established, no drop selected
+        const s = sel(1, 'PB')
         const r = run([s], p)
         expect(statusOf(r, s)).toBe('warning')
-        expect(r.get(s.id).reasons[0].message).toContain('9 higher-grade games')
+        expect(r.get(s.id).reasons[0].message).toContain('locks out any drop')
     })
 
     it('unavailable-bucket selections are ignored', () => {
