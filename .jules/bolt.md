@@ -1,0 +1,3 @@
+## 2024-05-04 - Optimize useRoundManager getters
+**Learning:** React component getter functions invoking O(N) operations (`.filter`, `.sort`, `.find`) on each call cause severe performance bottlenecks during frequent renders (e.g., drag and drop).
+**Action:** Always precompute derived state into O(1) hash maps using `useMemo` when working with large lists in React components that are accessed frequently.
