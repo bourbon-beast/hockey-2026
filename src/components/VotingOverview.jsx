@@ -539,6 +539,7 @@ export default function VotingOverview({ teams }) {
                 onClick={load}
                 className="rounded-lg p-1 text-slate-400 hover:text-slate-700"
                 title="Refresh"
+                aria-label="Refresh top three"
               >
                 <RefreshCw size={15} />
               </button>
