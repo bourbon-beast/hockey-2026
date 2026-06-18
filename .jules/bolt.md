@@ -1,0 +1,3 @@
+## 2025-02-20 - React Array Getter Anti-Pattern
+**Learning:** Returning fresh array structures (e.g. `.filter()`, `.sort()`) directly from hook getter methods invoked during render strictly defeats child component memoization and forces expensive re-rendering down the entire component tree, bottlenecking interactions like drag and drop that rely on 60fps.
+**Action:** When a hook requires complex array partitioning or indexing to serve multiple getter functions, utilize `useMemo` at the top level of the hook to eagerly pre-compute and sort indexed data into O(1) hash maps that map ID string -> Array. The getter then acts as a simple `return memoizedMap[id] || []`.
