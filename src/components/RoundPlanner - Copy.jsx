@@ -1530,7 +1530,7 @@ export default function RoundPlanner({ statuses, onSelectPlayer }) {
                         <button
                           onClick={() => markSelectionUnavailable(team.id, sel.player_id, false)}
                           title="Move back to squad"
-                          className="text-slate-400 hover:text-blue-500 transition-colors text-xs sm:opacity-0 sm:group-hover:opacity-100 flex-shrink-0"
+                          className="text-slate-400 hover:text-blue-500 transition-colors text-xs sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100 flex-shrink-0"
                         >
                           ↑ squad
                         </button>
