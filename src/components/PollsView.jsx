@@ -214,7 +214,7 @@ function CreatePollModal({ teams, players, onClose, onCreated }) {
             <h2 className="text-lg font-semibold text-slate-900">New poll</h2>
             <p className="text-xs text-slate-500">Create one public link and track responses against the selected audience.</p>
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-700">
+          <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-slate-400 hover:bg-slate-50 hover:text-slate-700">
             <X className="h-5 w-5" />
           </button>
         </div>

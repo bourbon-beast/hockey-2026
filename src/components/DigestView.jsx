@@ -250,6 +250,7 @@ function DigestPanel() {
           </span>
           <button
             type="button"
+            aria-label="Export digest images"
             disabled={!selected?.html?.trim() || exportingImages}
             title="Downloads 3 PNGs: results, next round, season stats"
             onClick={handleExportImages}
