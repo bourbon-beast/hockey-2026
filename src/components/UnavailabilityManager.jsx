@@ -307,6 +307,7 @@ export default function UnavailabilityManager({ onSelectPlayer }) {
                 </p>
               </div>
               <button onClick={() => setPickerRound(null)}
+                aria-label="Close"
                 className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
             </div>
 
