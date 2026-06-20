@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { ArrowUpDown, AlertTriangle, MapPin, MessageSquare, MessageSquareText, Vote } from 'lucide-react'
 import { AVAILABILITY, POSITIONS, POSITION_STYLES } from './roundUtils'
 import { checkClash } from '../kitClashes'
@@ -158,7 +158,8 @@ const ELIGIBILITY_BADGE_STYLES = {
     ok:      'bg-orange-100 text-orange-600',
 }
 
-export default function TeamColumn({
+// ⚡ Bolt: Performance Optimization
+const TeamColumn = React.memo(function TeamColumn({
     team, state, actions, getters, duplicateIds, eligibilityResults, onSelectPlayer, setPickerOpen, onCreateVoteLink
 }) {
     const { allPlayers, roundUnavailability, draggedPlayer, dragOverInfo, currentRound } = state
@@ -642,4 +643,6 @@ export default function TeamColumn({
             </div>
         </div>
     )
-}
+})
+
+export default TeamColumn
