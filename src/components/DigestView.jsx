@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Check, ChevronDown, Copy, Images } from 'lucide-react'
+import DOMPurify from 'dompurify'
 import { getDigestHistory, getPlayers } from '../db'
 import { exportDigestImageTriptych } from '../utils/digestExportImages'
 import PageHeader from './PageHeader'
@@ -278,7 +279,12 @@ function DigestPanel() {
       {selected && (
         <div className="mt-4 overflow-hidden rounded-xl border border-slate-100 bg-white shadow-sm">
           {selected.html
-            ? <div className="p-4 text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: selected.html }} />
+            ? (
+              <>
+                {/* 🛡️ Sentinel: Sanitize HTML to prevent XSS vulnerability */}
+                <div className="p-4 text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.html) }} />
+              </>
+            )
             : <pre className="whitespace-pre-wrap p-4 font-sans text-sm leading-relaxed text-slate-700">{selected.text}</pre>}
         </div>
       )}
