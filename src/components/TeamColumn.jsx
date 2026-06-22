@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, memo } from 'react'
 import { ArrowUpDown, AlertTriangle, MapPin, MessageSquare, MessageSquareText, Vote } from 'lucide-react'
 import { AVAILABILITY, POSITIONS, POSITION_STYLES } from './roundUtils'
 import { checkClash } from '../kitClashes'
@@ -158,7 +158,7 @@ const ELIGIBILITY_BADGE_STYLES = {
     ok:      'bg-orange-100 text-orange-600',
 }
 
-export default function TeamColumn({
+function TeamColumn({
     team, state, actions, getters, duplicateIds, eligibilityResults, onSelectPlayer, setPickerOpen, onCreateVoteLink
 }) {
     const { allPlayers, roundUnavailability, draggedPlayer, dragOverInfo, currentRound } = state
@@ -643,3 +643,6 @@ export default function TeamColumn({
         </div>
     )
 }
+
+// ⚡ Bolt: Performance Optimization - Memoize TeamColumn to prevent unnecessary re-renders in RoundPlanner grid.
+export default memo(TeamColumn)
