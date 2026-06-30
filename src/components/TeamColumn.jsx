@@ -294,6 +294,7 @@ export default function TeamColumn({
                             className={`sm:hidden w-7 h-7 flex items-center justify-center rounded transition-colors flex-shrink-0
                                 ${sortMode ? 'bg-yellow-400 text-slate-900' : 'bg-white/10 text-white/60 hover:bg-white/20'}`}
                             title={sortMode ? 'Exit sort mode' : 'Sort players'}
+                            aria-label={sortMode ? 'Exit sort mode' : 'Sort players'}
                         >
                             <ArrowUpDown size={13} strokeWidth={2.5} />
                         </button>
