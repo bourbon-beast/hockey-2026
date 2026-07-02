@@ -286,7 +286,7 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
               <p className="text-xs text-gray-400 mt-1">This player won't appear in selection lists</p>
             )}
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none flex-shrink-0">×</button>
+          <button onClick={onClose} aria-label="Close" title="Close" className="text-gray-400 hover:text-gray-600 text-2xl leading-none flex-shrink-0">×</button>
         </div>
 
         {/* ── Body ── */}
@@ -366,6 +366,8 @@ export default function PlayerModal({ player, teams, statuses, onClose, onPlayer
                           setTeamsPlayed(prev => prev.filter(t => t !== teamId))
                           await removeTeamPlayed(player.id, teamId)
                         }}
+                        aria-label={`Remove team ${teamId}`}
+                        title={`Remove ${teamId}`}
                         className="ml-0.5 text-blue-400 hover:text-red-500 transition-colors leading-none"
                       >
                         ×
