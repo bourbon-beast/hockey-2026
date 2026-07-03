@@ -215,6 +215,7 @@ export default function UnavailabilityManager({ onSelectPlayer }) {
                   onClick={() => removeEntry(player.id, rid)}
                   className="w-3 text-slate-200 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 text-xs leading-none"
                   title="Remove"
+                  aria-label="Remove"
                 >×</button>
               </div>
             )
@@ -307,6 +308,7 @@ export default function UnavailabilityManager({ onSelectPlayer }) {
                 </p>
               </div>
               <button onClick={() => setPickerRound(null)}
+                aria-label="Close"
                 className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
             </div>
 
