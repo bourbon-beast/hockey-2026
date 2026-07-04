@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { sendPasswordReset, signInWithEmailPassword, signInWithGoogle, signOutUser } from '../auth'
+import { Loader2 } from 'lucide-react'
 
 export default function LoginPage({ deniedUser = null, accessError = '' }) {
   const [email, setEmail]     = useState('')
@@ -118,8 +119,9 @@ export default function LoginPage({ deniedUser = null, accessError = '' }) {
           type="button"
           onClick={handleGoogle}
           disabled={loading}
-          className="w-full rounded-lg border border-white/15 bg-white/10 px-4 py-2.5 sm:py-3 text-sm font-bold text-white transition-colors hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+          className="w-full rounded-lg border border-white/15 bg-white/10 px-4 py-2.5 sm:py-3 text-sm font-bold text-white transition-colors hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40 flex items-center justify-center gap-2"
         >
+          {loading && <Loader2 className="w-4 h-4 animate-spin" />}
           Sign in with Google
         </button>
 
@@ -131,6 +133,7 @@ export default function LoginPage({ deniedUser = null, accessError = '' }) {
 
         <input
           type="email"
+          aria-label="Email address"
           value={email}
           onChange={e => setEmail(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleSubmit()}
@@ -143,6 +146,7 @@ export default function LoginPage({ deniedUser = null, accessError = '' }) {
         />
         <input
           type="password"
+          aria-label="Password"
           value={password}
           onChange={e => setPassword(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleSubmit()}
@@ -165,9 +169,10 @@ export default function LoginPage({ deniedUser = null, accessError = '' }) {
           onClick={handleSubmit}
           disabled={loading || !email.trim() || !password}
           className="w-full py-2.5 sm:py-3 rounded-lg font-bold text-sm transition-colors
-                     disabled:opacity-40 disabled:cursor-not-allowed"
+                     disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           style={{ background: '#eab308', color: '#0f172a' }}
         >
+          {loading && <Loader2 className="w-4 h-4 animate-spin" />}
           {loading ? 'Signing in...' : 'Sign in'}
         </button>
 
