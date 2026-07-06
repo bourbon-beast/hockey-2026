@@ -188,6 +188,7 @@ function MatchCard({ team, match }) {
         <button
           onClick={handleCopy}
           title="Copy fixture line"
+          aria-label="Copy fixture line"
           className={`flex items-center justify-center w-9 flex-shrink-0 border-l transition-colors
                       ${copied
                         ? 'bg-green-50 border-green-200 text-green-600'
@@ -259,6 +260,7 @@ function FixturePanel({ teams }) {
       <div className="flex items-center gap-2">
         <button onClick={() => prevRound && setSelected(prevRound.id)}
                 disabled={!prevRound}
+                aria-label="Previous round"
                 className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200
                            bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-30 text-base font-bold flex-shrink-0">
           ‹
@@ -289,6 +291,7 @@ function FixturePanel({ teams }) {
         )}
         <button onClick={() => nextRound && setSelected(nextRound.id)}
                 disabled={!nextRound}
+                aria-label="Next round"
                 className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200
                            bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-30 text-base font-bold flex-shrink-0">
           ›
