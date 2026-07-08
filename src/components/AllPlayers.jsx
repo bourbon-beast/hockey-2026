@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { getPlayers, createPlayer } from '../db'
 import PageHeader from './PageHeader'
 import { generateNonFinancialHtml, generateNonFinancialPlainText, buildNonFinancialCanvas } from '../utils/generateNonFinancialHtml'
@@ -158,7 +158,8 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
 
   useEffect(() => { loadPlayers() }, [refreshKey, showInactive])
 
-  const filtered = players
+  // ⚡ Bolt: Memoize filtered list to prevent expensive re-sorting on every render
+  const filtered = useMemo(() => players
     .filter(p => {
       if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false
       if (statusFilters.size > 0 && !statusFilters.has(p.status_id)) return false
@@ -174,7 +175,7 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
       if (sortBy === 'cardPts') cmp = cardPoints(b.stats_2026) - cardPoints(a.stats_2026)
       if (sortBy === 'status') cmp = a.status_id.localeCompare(b.status_id)
       return sortDir === 'asc' ? cmp : -cmp
-    })
+    }), [players, search, statusFilters, nonFinancialOnly, sortBy, sortDir])
 
   const toggleSort = (col) => {
     if (sortBy === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -196,8 +197,9 @@ export default function AllPlayers({ statuses, teams, onSelectPlayer, refreshKey
     onRefresh?.()
   }
 
-  const inactiveCount = players.filter(p => p.is_active === 0).length
-  const nonFinancialCount = players.filter(p => p.is_not_financial === 1).length
+  // ⚡ Bolt: Memoize derived counts
+  const inactiveCount = useMemo(() => players.filter(p => p.is_active === 0).length, [players])
+  const nonFinancialCount = useMemo(() => players.filter(p => p.is_not_financial === 1).length, [players])
 
   const buildNonFinancialExportList = (list) =>
     list
