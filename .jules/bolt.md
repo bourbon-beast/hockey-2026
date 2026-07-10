@@ -1,0 +1,3 @@
+## 2024-05-19 - O(N) Anti-pattern in React Hook Getters
+**Learning:** Returning dynamically computed values via O(N) array operations (e.g. `.filter()`, `.find()`, `.forEach()`) directly within getter functions returned by a custom hook causes severe performance bottlenecks during frequent renders (like drag and drop interactions). Every single component that calls these getters triggers a full array iteration on every render.
+**Action:** When a hook exposes getters that derived data from large arrays, strictly pre-compute and store the derived data into O(1) hash maps using `useMemo` triggered by the source data dependency. Update the getter functions to perform simple O(1) property lookups from the memoized map.
