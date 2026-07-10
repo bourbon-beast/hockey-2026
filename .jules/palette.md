@@ -1,0 +1,3 @@
+## 2024-04-30 - Hover-revealed elements need focus-visible:opacity-100
+**Learning:** When styling interactive elements that rely on a parent hover state to become visible (e.g., using Tailwind classes like `opacity-0 group-hover:opacity-100`), they remain invisible during keyboard navigation.
+**Action:** Always include `focus-visible:opacity-100` so the element remains visible when focused via keyboard navigation, ensuring full accessibility.
