@@ -1,0 +1,3 @@
+## 2026-04-19 - Add missing ARIA labels to drag-and-drop squad builder
+**Learning:** Icon-only buttons within highly interactive components like drag-and-drop lists often get overlooked for accessibility because the visual context is obvious to sighted users. Missing labels here severely hinder screen reader navigation during core application flows. Additionally, hover-reliant styling on interactive elements makes them effectively invisible to keyboard users unless explicitly handled with `focus-visible`.
+**Action:** Always pair `hover:` states with `focus-visible:` for keyboard navigability, explicitly set `aria-label` on any button without text, and hide decorative inner SVGs with `aria-hidden="true"` to prevent redundant screen reader announcements.
