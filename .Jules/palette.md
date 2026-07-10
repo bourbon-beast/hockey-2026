@@ -1,0 +1,3 @@
+## 2024-04-11 - Accessibility for icon-only remove buttons
+**Learning:** Icon-only remove buttons (SVG trashcans) in `TeamColumn.jsx` lack `aria-label` attributes and focus visible styles, making them inaccessible to screen readers and difficult to navigate via keyboard. This pattern is common in lists/grids.
+**Action:** When adding ARIA labels to icon-only buttons, always ensure the labels provide context (e.g., 'Remove [Player Name] from squad' instead of just 'Remove') to clearly indicate the specific action to screen reader users, especially in list or grid views. Pair this with proper `focus-visible` utility classes and add small padding (e.g., `p-0.5`) to SVG buttons so the focus ring isn't uncomfortably tight.
