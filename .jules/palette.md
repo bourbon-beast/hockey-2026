@@ -1,0 +1,3 @@
+## 2026-05-01 - Accessible Icon Buttons in Team Column
+**Learning:** Interactive list elements with icon-only buttons (like move up/down, remove player, toggle status) often lack accessibility context and focus styles by default. A generic 'Remove' aria-label is insufficient when there are multiple identical buttons in a list; context is required.
+**Action:** Always append dynamic contextual data (e.g., 'Remove [Player Name]') to `aria-label` attributes on icon-only buttons within lists, apply `focus-visible` outline rings, and hide inner decorative SVGs from screen readers using `aria-hidden='true'`.
