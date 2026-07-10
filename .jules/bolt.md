@@ -1,0 +1,3 @@
+## 2024-05-11 - Optimize O(N) operations in getters
+**Learning:** Frequent React re-renders triggered by complex drag-and-drop interactions cause performance drops when getters inside components use O(N) array operations like `.filter()`, `.sort()`, or `.find()`.
+**Action:** Strictly compute derived states using `useMemo` to pre-build O(1) hash map lookups from source arrays to maintain high performance and 60fps during frequent re-renders.
