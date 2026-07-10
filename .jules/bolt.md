@@ -1,0 +1,3 @@
+## 2024-05-22 - Optimize getTeamActiveSelections with useMemo
+**Learning:** In highly interactive React components like drag-and-drop, using O(N) operations like `.filter().sort()` within `useCallback` or normal function declarations causes unnecessary overhead during each 60fps re-render, creating noticeable UI jank.
+**Action:** When implementing getter functions that compute state arrays for child components from a larger central dataset, pre-compute these arrays using `useMemo` so that the operations only run when the dependencies change, avoiding O(N) operations during frequent re-renders.
