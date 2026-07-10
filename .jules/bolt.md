@@ -1,0 +1,3 @@
+## 2025-02-14 - Pre-compute O(1) hash maps for frequent getter functions
+**Learning:** In complex React trees with frequent re-renders (like drag-and-drop interactions), exposing getter functions that perform O(N) array operations (e.g., `.filter()`, `.sort()`) on large data structures can cause significant performance bottlenecks.
+**Action:** Use `useMemo` to pre-compute derived state into O(1) hash maps instead of recalculating on every invocation, especially when getters are called multiple times per render cycle across many child components.
