@@ -1,0 +1,3 @@
+## 2025-05-18 - Improve Accessibility for Hidden Icon-Only Buttons
+**Learning:** Icon-only remove buttons (`x` or Trash icons) in `TeamColumn.jsx` and `UnavailabilityManager.jsx` were invisible to keyboard users because they relied exclusively on `group-hover:opacity-100`. Additionally, they lacked `aria-label`s, rendering them inscrutable to screen readers.
+**Action:** When hiding interactive elements using `opacity-0` and revealing them via hover (e.g., `group-hover:opacity-100`), ensure keyboard accessibility by pairing it with `focus-visible:opacity-100`. Always ensure icon-only buttons include an `aria-label` and `title`, and add `aria-hidden="true"` to the internal `<svg>`.
