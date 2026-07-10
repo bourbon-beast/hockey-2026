@@ -1,0 +1,3 @@
+## 2024-05-17 - Context-Aware ARIA Labels in Mapped Lists
+**Learning:** When using icon-only buttons inside dynamic list mappings (e.g. squad list), generic `aria-label`s like "Remove" or "Up" create ambiguous experiences for screen readers. The `aria-label` must include the list item's identifying data (e.g., player name: \`Remove ${sel.name} from squad\`) so users know exactly which item the action will apply to without relying on visual adjacency.
+**Action:** Always inject the mapped item's unique identifier/name into the `aria-label` of interactive elements within a `.map()` loop, especially for sorting, toggling states, and destructive actions.
