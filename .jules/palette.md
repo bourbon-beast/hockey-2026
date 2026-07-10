@@ -1,0 +1,3 @@
+## 2025-05-15 - [Add missing aria-labels to icon-only buttons & ensure focus visibility on hover-only elements]
+**Learning:** Found an icon-only delete button in `TeamColumn.jsx` lacking an `aria-label` or `title`, and elements using `sm:opacity-0 sm:group-hover:opacity-100` without a `focus-visible:opacity-100` state. This makes keyboard navigation difficult because the element remains invisible when focused.
+**Action:** Add `aria-label` or `title` to icon-only buttons to give context. Add `focus-visible:opacity-100` to elements that rely on `opacity-0` but need to appear when receiving focus.
