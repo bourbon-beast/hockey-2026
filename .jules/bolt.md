@@ -1,0 +1,3 @@
+## 2025-03-01 - [Optimize O(N) Array Operations in React Render]
+**Learning:** In complex state structures like a Round Planner where dragging and dropping causes frequent re-renders, computing derived properties via O(N) array loops (like `.filter()`, `.find()`, `.sort()`) in getter functions that execute multiple times per render cycle (e.g., once for each team column) acts as a significant bottleneck. O(N) repeated operations should be consolidated.
+**Action:** Use `useMemo` to iterate through the main array state exactly once, building lookup dictionaries. Then, getter functions simply perform an O(1) hash map lookup, keeping re-renders snappy.
