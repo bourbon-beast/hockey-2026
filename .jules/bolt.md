@@ -1,0 +1,3 @@
+## 2026-04-29 - Memoize O(n) getters in useRoundManager
+**Learning:** In a heavily interactive drag-and-drop React UI (like RoundPlanner), getters that perform O(N) array operations (like `.filter()`, `.find()`, `.sort()`) on large derived datasets (like `roundData.selections`) execute on every render for every column. This causes significant performance bottlenecks during dragging and drops.
+**Action:** When computing derived states in React hooks that expose getter functions, strictly compute derived states using `useMemo` to pre-build O(1) hash map lookups from the source arrays. Avoid using O(N) array operations inside the getter functions themselves.
