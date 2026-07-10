@@ -1,0 +1,3 @@
+## 2024-04-20 - Ensure Keyboard Reachability for Group-Hover Elements
+**Learning:** When using utility classes like `sm:opacity-0 sm:group-hover:opacity-100` to hide buttons until hovered over by a mouse, keyboard-only users will not see these buttons even when they successfully navigate and focus onto them, which makes the app non-functional.
+**Action:** Always append `sm:focus-visible:opacity-100` alongside `sm:group-hover:opacity-100` so that elements become visibly distinct when focused via keyboard tabulation. Also remember to explicitly style focus indicators (e.g., `focus-visible:ring-2`) and add contextual aria-labels.
