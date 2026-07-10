@@ -1,0 +1,3 @@
+## 2026-04-20 - O(n) array iterations in React Getters
+**Learning:** React getter functions executed sequentially (like repeatedly filtering the entire `roundData.selections` array for each team during render) are prone to O(N*M) performance drops when processing multiple dynamic teams and players inside `useRoundManager`.
+**Action:** Replace multiple inline iterations across different getters with a single `useMemo` block that aggregates lists into lookup maps (like `teamsMap`) which then changes iterative filtering into fast O(1) object lookups per team, boosting derivation speed significantly.
